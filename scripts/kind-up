@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+source "${PROJECT_ROOT}/config/container-images.sh"
+
+require_command podman
+require_command kind
+require_command kubectl
+require_command helm
+
+readonly CLUSTER_NAME="fx-demo"
+readonly EXPECTED_CONTEXT="kind-${CLUSTER_NAME}"
+readonly STRIMZI_CHART_VERSION="${STRIMZI_OPERATOR_IMAGE_TAG}"
+readonly DATADOG_OPERATOR_CHART_VERSION="2.25.1"
+readonly DATADOG_OPERATOR_IMAGE_VERSION="${DATADOG_OPERATOR_IMAGE_TAG}"
+readonly KIND_CONTROL_PLANE="${CLUSTER_NAME}-control-plane"
+
+export KIND_EXPERIMENTAL_PROVIDER=podman
+
+echo "Container runtime: $(podman --version)"
+echo "Target kind cluster: ${CLUSTER_NAME}"
+
+podman_arch="$(podman info --format '{{.Host.Arch}}')"
+case "${podman_arch}" in
+  amd64) kind_node_image="${KIND_NODE_IMAGE_AMD64}" ;;
+  arm64) kind_node_image="${KIND_NODE_IMAGE_ARM64}" ;;
+  *) die "Unsupported Podman machine architecture: ${podman_arch}" ;;
+esac
+echo "kind node image: ${kind_node_image} (${KIND_NODE_IMAGE_TAG})"
+
+if podman container exists "${KIND_CONTROL_PLANE}"; then
+  if [[ "$(podman inspect --format '{{.State.Running}}' "${KIND_CONTROL_PLANE}")" != "true" ]]; then
+    echo "Starting the existing kind control-plane container."
+    podman start "${KIND_CONTROL_PLANE}" >/dev/null
+  fi
+  echo "kind cluster already exists; it will not be recreated."
+else
+  kind create cluster \
+    --name "${CLUSTER_NAME}" \
+    --image "${kind_node_image}" \
+    --config "${PROJECT_ROOT}/deploy/kind/cluster.yaml"
+fi
+
+# A previous create may have completed the cluster before kubeconfig persistence
+# failed. Export on every run so the script is safely resumable.
+kind export kubeconfig --name "${CLUSTER_NAME}"
+kubectl config use-context "${EXPECTED_CONTEXT}" >/dev/null
+require_exact_context "${EXPECTED_CONTEXT}"
+kubectl wait node --all --for=condition=Ready --timeout=2m
+
+kubectl create namespace strimzi-system --dry-run=client -o yaml | kubectl apply -f -
+helm upgrade --install strimzi-kafka-operator \
+  oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+  --version "${STRIMZI_CHART_VERSION}" \
+  --namespace strimzi-system \
+  --set watchAnyNamespace=true \
+  --set-string "image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  --set-string "image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --set-string "kafka.image.digest=${STRIMZI_KAFKA_IMAGE_INDEX_DIGEST}" \
+  --set-string "topicOperator.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  --set-string "topicOperator.image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --set-string "userOperator.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  --set-string "userOperator.image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --set-string "kafkaInit.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  --set-string "kafkaInit.image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --wait \
+  --timeout 5m
+
+helm repo add datadog https://helm.datadoghq.com --force-update
+kubectl create namespace datadog --dry-run=client -o yaml | kubectl apply -f -
+helm upgrade --install datadog-operator datadog/datadog-operator \
+  --version "${DATADOG_OPERATOR_CHART_VERSION}" \
+  --namespace datadog \
+  --set-string "image.repository=${DATADOG_OPERATOR_IMAGE_NAME}" \
+  --set-string "image.tag=${DATADOG_OPERATOR_IMAGE_VERSION}@${DATADOG_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --set 'watchNamespaces[0]=datadog' \
+  --set 'watchNamespacesAgent[0]=datadog' \
+  --set operatorMetricsEnabled=false \
+  --wait \
+  --timeout 5m
+
+kubectl create namespace "${FX_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+echo "kind cluster and required operators are ready."

@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+source "${PROJECT_ROOT}/config/container-images.sh"
+
+require_command podman
+require_command jq
+
+verify_index_digest() {
+  local image_name="$1"
+  local image_tag="$2"
+  local expected_digest="$3"
+  local manifest
+
+  manifest="$(podman manifest inspect "${image_name}@${expected_digest}")"
+  jq -e \
+    '[.manifests[].platform | select(.os == "linux") | .architecture]
+     | (index("amd64") != null and index("arm64") != null)' \
+    <<<"${manifest}" >/dev/null || {
+      die "The locked image index lacks Linux AMD64 or ARM64: ${image_name}@${expected_digest}."
+    }
+  echo "Verified ${image_name}:${image_tag} multi-architecture index ${expected_digest}"
+}
+
+verify_platform_digest() {
+  local image_name="$1"
+  local image_tag="$2"
+  local architecture="$3"
+  local expected_digest="$4"
+  local actual_digest
+
+  actual_digest="$(podman manifest inspect --verbose "${image_name}:${image_tag}" \
+    | jq -er --arg architecture "${architecture}" \
+      '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == $architecture)][0].digest')"
+  if [[ "${actual_digest}" != "${expected_digest}" ]]; then
+    die "Digest changed for ${image_name}:${image_tag} (${architecture}): expected ${expected_digest}, got ${actual_digest}."
+  fi
+  echo "Verified ${image_name}:${image_tag} (${architecture}) ${actual_digest}"
+}
+
+verify_config_digest() {
+  local image_name="$1"
+  local platform_digest="$2"
+  local architecture="$3"
+  local expected_config_digest="$4"
+  local image_ref="${image_name}@${platform_digest}"
+  local image_id
+  local actual_config_digest
+
+  podman pull --platform "linux/${architecture}" "${image_ref}" >/dev/null
+  image_id="$(podman image inspect "${image_ref}" --format '{{.Id}}')"
+  actual_config_digest="sha256:${image_id#sha256:}"
+  if [[ "${actual_config_digest}" != "${expected_config_digest}" ]]; then
+    die "Image config changed for ${image_ref}: expected ${expected_config_digest}, got ${actual_config_digest}."
+  fi
+  echo "Verified image config ${image_ref} ${actual_config_digest}"
+}
+
+verify_index_digest docker.io/library/maven "${MAVEN_IMAGE_TAG}" "${MAVEN_IMAGE_INDEX_DIGEST}"
+verify_index_digest docker.io/library/eclipse-temurin "${JAVA_RUNTIME_IMAGE_TAG}" "${JAVA_RUNTIME_IMAGE_INDEX_DIGEST}"
+verify_index_digest docker.io/kindest/node "${KIND_NODE_IMAGE_TAG}" "${KIND_NODE_IMAGE_INDEX_DIGEST}"
+verify_index_digest "${POSTGRES_IMAGE_NAME}" "${POSTGRES_IMAGE_TAG}" "${POSTGRES_IMAGE_INDEX_DIGEST}"
+verify_index_digest "${STRIMZI_OPERATOR_IMAGE_NAME}" "${STRIMZI_OPERATOR_IMAGE_TAG}" "${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}"
+verify_index_digest "${STRIMZI_KAFKA_IMAGE_NAME}" "${STRIMZI_KAFKA_IMAGE_TAG}" "${STRIMZI_KAFKA_IMAGE_INDEX_DIGEST}"
+verify_index_digest "${DATADOG_OPERATOR_IMAGE_NAME}" "${DATADOG_OPERATOR_IMAGE_TAG}" "${DATADOG_OPERATOR_IMAGE_INDEX_DIGEST}"
+verify_index_digest "${DATADOG_AGENT_IMAGE_NAME}" "${DATADOG_AGENT_IMAGE_TAG}" "${DATADOG_AGENT_IMAGE_INDEX_DIGEST}"
+verify_index_digest "${DATADOG_CLUSTER_AGENT_IMAGE_NAME}" "${DATADOG_CLUSTER_AGENT_IMAGE_TAG}" "${DATADOG_CLUSTER_AGENT_IMAGE_INDEX_DIGEST}"
+verify_index_digest "${DATADOG_JAVA_TRACER_IMAGE_NAME}" "${DATADOG_JAVA_TRACER_IMAGE_TAG}" "${DATADOG_JAVA_TRACER_IMAGE_INDEX_DIGEST}"
+verify_index_digest "${DATADOG_APM_INJECT_IMAGE_NAME}" "${DATADOG_APM_INJECT_IMAGE_TAG}" "${DATADOG_APM_INJECT_IMAGE_INDEX_DIGEST}"
+
+verify_platform_digest docker.io/library/maven "${MAVEN_IMAGE_TAG}" amd64 "${MAVEN_IMAGE_AMD64#*@}"
+verify_platform_digest docker.io/library/maven "${MAVEN_IMAGE_TAG}" arm64 "${MAVEN_IMAGE_ARM64#*@}"
+verify_platform_digest docker.io/library/eclipse-temurin "${JAVA_RUNTIME_IMAGE_TAG}" amd64 "${JAVA_RUNTIME_IMAGE_AMD64#*@}"
+verify_platform_digest docker.io/library/eclipse-temurin "${JAVA_RUNTIME_IMAGE_TAG}" arm64 "${JAVA_RUNTIME_IMAGE_ARM64#*@}"
+verify_platform_digest docker.io/kindest/node "${KIND_NODE_IMAGE_TAG}" amd64 "${KIND_NODE_IMAGE_AMD64#*@}"
+verify_platform_digest docker.io/kindest/node "${KIND_NODE_IMAGE_TAG}" arm64 "${KIND_NODE_IMAGE_ARM64#*@}"
+verify_platform_digest "${POSTGRES_IMAGE_NAME}" "${POSTGRES_IMAGE_TAG}" amd64 "${POSTGRES_IMAGE_AMD64_DIGEST}"
+verify_platform_digest "${STRIMZI_OPERATOR_IMAGE_NAME}" "${STRIMZI_OPERATOR_IMAGE_TAG}" amd64 "${STRIMZI_OPERATOR_IMAGE_AMD64_DIGEST}"
+verify_platform_digest "${STRIMZI_KAFKA_IMAGE_NAME}" "${STRIMZI_KAFKA_IMAGE_TAG}" amd64 "${STRIMZI_KAFKA_IMAGE_AMD64_DIGEST}"
+verify_platform_digest "${DATADOG_OPERATOR_IMAGE_NAME}" "${DATADOG_OPERATOR_IMAGE_TAG}" amd64 "${DATADOG_OPERATOR_IMAGE_AMD64_DIGEST}"
+verify_platform_digest "${DATADOG_AGENT_IMAGE_NAME}" "${DATADOG_AGENT_IMAGE_TAG}" amd64 "${DATADOG_AGENT_IMAGE_AMD64_DIGEST}"
+verify_platform_digest "${DATADOG_CLUSTER_AGENT_IMAGE_NAME}" "${DATADOG_CLUSTER_AGENT_IMAGE_TAG}" amd64 "${DATADOG_CLUSTER_AGENT_IMAGE_AMD64_DIGEST}"
+verify_platform_digest "${DATADOG_JAVA_TRACER_IMAGE_NAME}" "${DATADOG_JAVA_TRACER_IMAGE_TAG}" amd64 "${DATADOG_JAVA_TRACER_IMAGE_AMD64_DIGEST}"
+verify_platform_digest "${DATADOG_APM_INJECT_IMAGE_NAME}" "${DATADOG_APM_INJECT_IMAGE_TAG}" amd64 "${DATADOG_APM_INJECT_IMAGE_AMD64_DIGEST}"
+verify_platform_digest "${POSTGRES_IMAGE_NAME}" "${POSTGRES_IMAGE_TAG}" arm64 "${POSTGRES_IMAGE_ARM64_DIGEST}"
+verify_platform_digest "${STRIMZI_OPERATOR_IMAGE_NAME}" "${STRIMZI_OPERATOR_IMAGE_TAG}" arm64 "${STRIMZI_OPERATOR_IMAGE_ARM64_DIGEST}"
+verify_platform_digest "${STRIMZI_KAFKA_IMAGE_NAME}" "${STRIMZI_KAFKA_IMAGE_TAG}" arm64 "${STRIMZI_KAFKA_IMAGE_ARM64_DIGEST}"
+verify_platform_digest "${DATADOG_OPERATOR_IMAGE_NAME}" "${DATADOG_OPERATOR_IMAGE_TAG}" arm64 "${DATADOG_OPERATOR_IMAGE_ARM64_DIGEST}"
+verify_platform_digest "${DATADOG_AGENT_IMAGE_NAME}" "${DATADOG_AGENT_IMAGE_TAG}" arm64 "${DATADOG_AGENT_IMAGE_ARM64_DIGEST}"
+verify_platform_digest "${DATADOG_CLUSTER_AGENT_IMAGE_NAME}" "${DATADOG_CLUSTER_AGENT_IMAGE_TAG}" arm64 "${DATADOG_CLUSTER_AGENT_IMAGE_ARM64_DIGEST}"
+verify_platform_digest "${DATADOG_JAVA_TRACER_IMAGE_NAME}" "${DATADOG_JAVA_TRACER_IMAGE_TAG}" arm64 "${DATADOG_JAVA_TRACER_IMAGE_ARM64_DIGEST}"
+verify_platform_digest "${DATADOG_APM_INJECT_IMAGE_NAME}" "${DATADOG_APM_INJECT_IMAGE_TAG}" arm64 "${DATADOG_APM_INJECT_IMAGE_ARM64_DIGEST}"
+
+verify_config_digest "${POSTGRES_IMAGE_NAME}" "${POSTGRES_IMAGE_AMD64_DIGEST}" amd64 "${POSTGRES_IMAGE_AMD64_CONFIG_DIGEST}"
+verify_config_digest "${STRIMZI_OPERATOR_IMAGE_NAME}" "${STRIMZI_OPERATOR_IMAGE_AMD64_DIGEST}" amd64 "${STRIMZI_OPERATOR_IMAGE_AMD64_CONFIG_DIGEST}"
+verify_config_digest "${STRIMZI_KAFKA_IMAGE_NAME}" "${STRIMZI_KAFKA_IMAGE_AMD64_DIGEST}" amd64 "${STRIMZI_KAFKA_IMAGE_AMD64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_OPERATOR_IMAGE_NAME}" "${DATADOG_OPERATOR_IMAGE_AMD64_DIGEST}" amd64 "${DATADOG_OPERATOR_IMAGE_AMD64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_AGENT_IMAGE_NAME}" "${DATADOG_AGENT_IMAGE_AMD64_DIGEST}" amd64 "${DATADOG_AGENT_IMAGE_AMD64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_CLUSTER_AGENT_IMAGE_NAME}" "${DATADOG_CLUSTER_AGENT_IMAGE_AMD64_DIGEST}" amd64 "${DATADOG_CLUSTER_AGENT_IMAGE_AMD64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_JAVA_TRACER_IMAGE_NAME}" "${DATADOG_JAVA_TRACER_IMAGE_AMD64_DIGEST}" amd64 "${DATADOG_JAVA_TRACER_IMAGE_AMD64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_APM_INJECT_IMAGE_NAME}" "${DATADOG_APM_INJECT_IMAGE_AMD64_DIGEST}" amd64 "${DATADOG_APM_INJECT_IMAGE_AMD64_CONFIG_DIGEST}"
+verify_config_digest "${POSTGRES_IMAGE_NAME}" "${POSTGRES_IMAGE_ARM64_DIGEST}" arm64 "${POSTGRES_IMAGE_ARM64_CONFIG_DIGEST}"
+verify_config_digest "${STRIMZI_OPERATOR_IMAGE_NAME}" "${STRIMZI_OPERATOR_IMAGE_ARM64_DIGEST}" arm64 "${STRIMZI_OPERATOR_IMAGE_ARM64_CONFIG_DIGEST}"
+verify_config_digest "${STRIMZI_KAFKA_IMAGE_NAME}" "${STRIMZI_KAFKA_IMAGE_ARM64_DIGEST}" arm64 "${STRIMZI_KAFKA_IMAGE_ARM64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_OPERATOR_IMAGE_NAME}" "${DATADOG_OPERATOR_IMAGE_ARM64_DIGEST}" arm64 "${DATADOG_OPERATOR_IMAGE_ARM64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_AGENT_IMAGE_NAME}" "${DATADOG_AGENT_IMAGE_ARM64_DIGEST}" arm64 "${DATADOG_AGENT_IMAGE_ARM64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_CLUSTER_AGENT_IMAGE_NAME}" "${DATADOG_CLUSTER_AGENT_IMAGE_ARM64_DIGEST}" arm64 "${DATADOG_CLUSTER_AGENT_IMAGE_ARM64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_JAVA_TRACER_IMAGE_NAME}" "${DATADOG_JAVA_TRACER_IMAGE_ARM64_DIGEST}" arm64 "${DATADOG_JAVA_TRACER_IMAGE_ARM64_CONFIG_DIGEST}"
+verify_config_digest "${DATADOG_APM_INJECT_IMAGE_NAME}" "${DATADOG_APM_INJECT_IMAGE_ARM64_DIGEST}" arm64 "${DATADOG_APM_INJECT_IMAGE_ARM64_CONFIG_DIGEST}"
+
+echo "All reviewed image tags, platform manifests, and image configs match the lock."

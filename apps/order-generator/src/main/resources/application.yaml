@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: order-generator
+  threads:
+    virtual:
+      enabled: true
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  statsd:
+    metrics:
+      export:
+        enabled: ${DD_METRICS_ENABLED:false}
+        flavor: datadog
+        host: ${DD_AGENT_HOST:localhost}
+        port: ${DD_DOGSTATSD_PORT:8125}
+        polling-frequency: 10s
+logging:
+  structured:
+    format:
+      console: logstash
+demo:
+  generator:
+    order-service-url: ${ORDER_SERVICE_URL:http://order-service:8080}
+    baseline-per-second: ${BASELINE_PER_SECOND:2}
+    surge-per-second: ${SURGE_PER_SECOND:20}
+    surge-duration-seconds: ${SURGE_DURATION_SECONDS:90}
+    traffic-seed: ${ORDER_TRAFFIC_SEED:20260819}

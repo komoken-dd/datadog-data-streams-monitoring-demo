@@ -1,0 +1,36 @@
+environment: demo
+image:
+  # The selected release lock or generated self-built values file supplies
+  # service-specific tag+digest references.
+  repositoryPrefix: ghcr.io/komoken-dd/datadog-data-streams-monitoring-demo
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+  references: {}
+storageClass:
+  create: true
+  name: gp3
+kafka:
+  # Match the deliberate single-worker EKS topology; this demo is not HA.
+  replicas: 1
+  partitions: 6
+  replicationFactor: 1
+  minInSyncReplicas: 1
+  storage:
+    size: 50Gi
+    deleteClaim: false
+    class: gp3
+postgresql:
+  createSecret: false
+  persistence:
+    enabled: true
+    size: 50Gi
+    class: gp3
+datadog:
+  namespace: datadog
+  clusterName: fx-demo-eks
+  clusterAgentReplicas: 1
+  kubeletTlsVerify: true
+  # scripts/deploy eks supplies both values from DD_SITE and the selected
+  # Kubernetes Secret; the placeholders make unsupported manual use fail fast.
+  site: REPLACE_WITH_DD_SITE
+  secretName: REPLACE_WITH_DATADOG_SECRET_NAME

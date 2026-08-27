@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+source "${PROJECT_ROOT}/config/container-images.sh"
+source "${PROJECT_ROOT}/scripts/image-sources.sh"
+
+target="${1:-}"
+if [[ "${target}" != "eks" ]]; then
+  echo "Usage: scripts/deploy eks" >&2
+  exit 1
+fi
+
+require_command aws
+require_command helm
+require_command jq
+require_command kubectl
+require_nonempty FX_DEMO_AWS_ACCOUNT_ID
+require_nonempty FX_DEMO_EKS_CONTEXT
+require_nonempty DD_API_KEY
+require_nonempty DD_APP_KEY
+require_nonempty DD_SITE
+readonly FX_DEMO_CREATE_K8S_SECRETS="${FX_DEMO_CREATE_K8S_SECRETS:-true}"
+readonly FX_DEMO_DSM_FULL_TOPOLOGY="${FX_DEMO_DSM_FULL_TOPOLOGY:-false}"
+readonly FX_DEMO_IMAGE_SOURCE="${FX_DEMO_IMAGE_SOURCE:-release}"
+readonly FX_DEMO_IMAGE_VALUES_FILE="${FX_DEMO_IMAGE_VALUES_FILE:-${PROJECT_ROOT}/deploy/values/values-self-built.json}"
+require_boolean FX_DEMO_CREATE_K8S_SECRETS
+require_boolean FX_DEMO_DSM_FULL_TOPOLOGY
+require_image_source "${FX_DEMO_IMAGE_SOURCE}"
+
+# Resolve and authenticate immutable image inputs before mutating Kubernetes.
+image_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/fx-demo-images.XXXXXX")"
+readonly image_work_dir
+cleanup_image_work_dir() {
+  case "${image_work_dir}" in
+    "${TMPDIR:-/tmp}"/fx-demo-images.*) rm -rf -- "${image_work_dir}" ;;
+    *) echo "Refusing to remove unexpected image directory: ${image_work_dir}" >&2 ;;
+  esac
+}
+trap cleanup_image_work_dir EXIT
+
+if [[ "${FX_DEMO_IMAGE_SOURCE}" == "release" ]]; then
+  require_nonempty FX_DEMO_RELEASE
+  application_image_values="${image_work_dir}/fx-demo-images-${FX_DEMO_RELEASE}.json"
+  download_and_verify_release_image_values "${FX_DEMO_RELEASE}" "${application_image_values}"
+else
+  application_image_values="${FX_DEMO_IMAGE_VALUES_FILE}"
+  validate_self_built_image_values "${application_image_values}"
+fi
+readonly application_image_values
+
+require_exact_context "${FX_DEMO_EKS_CONTEXT}"
+account_id="$(aws sts get-caller-identity --region "${AWS_REGION}" --query Account --output text)"
+if [[ ! "${FX_DEMO_AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]; then
+  die "FX_DEMO_AWS_ACCOUNT_ID must be a 12-digit AWS account ID."
+fi
+if [[ "${account_id}" != "${FX_DEMO_AWS_ACCOUNT_ID}" ]]; then
+  die "Refusing to deploy: expected AWS account ${FX_DEMO_AWS_ACCOUNT_ID}, got ${account_id}."
+fi
+datadog_secret_name="${FX_DEMO_DATADOG_SECRET_NAME:-datadog-secret}"
+echo "AWS account: ${account_id}"
+echo "AWS region: ${AWS_REGION}"
+echo "Datadog site: ${DD_SITE}"
+echo "Datadog Kubernetes Secret: ${datadog_secret_name}"
+echo "DSM full topology: ${FX_DEMO_DSM_FULL_TOPOLOGY}"
+
+require_datadog_credentials
+
+kubectl create namespace strimzi-system --dry-run=client -o yaml | kubectl apply -f -
+helm upgrade --install strimzi-kafka-operator \
+  oci://quay.io/strimzi-helm/strimzi-kafka-operator \
+  --version "${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  --namespace strimzi-system \
+  --set watchAnyNamespace=true \
+  --set-string "image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  --set-string "image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --set-string "kafka.image.digest=${STRIMZI_KAFKA_IMAGE_INDEX_DIGEST}" \
+  --set-string "topicOperator.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  --set-string "topicOperator.image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --set-string "userOperator.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  --set-string "userOperator.image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --set-string "kafkaInit.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  --set-string "kafkaInit.image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --wait \
+  --timeout 5m
+
+helm repo add datadog https://helm.datadoghq.com --force-update
+kubectl create namespace datadog --dry-run=client -o yaml | kubectl apply -f -
+helm upgrade --install datadog-operator datadog/datadog-operator \
+  --version 2.25.1 \
+  --namespace datadog \
+  --set-string "image.repository=${DATADOG_OPERATOR_IMAGE_NAME}" \
+  --set-string "image.tag=${DATADOG_OPERATOR_IMAGE_TAG}@${DATADOG_OPERATOR_IMAGE_INDEX_DIGEST}" \
+  --set 'watchNamespaces[0]=datadog' \
+  --set 'watchNamespacesAgent[0]=datadog' \
+  --set operatorMetricsEnabled=false \
+  --wait \
+  --timeout 5m
+
+kubectl create namespace "${FX_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+# Set FX_DEMO_CREATE_K8S_SECRETS=false when Secrets are provisioned externally.
+if [[ "${FX_DEMO_CREATE_K8S_SECRETS}" == "true" ]]; then
+  apply_datadog_secret datadog "${datadog_secret_name}"
+else
+  kubectl -n datadog get secret "${datadog_secret_name}" >/dev/null
+fi
+if kubectl -n "${FX_NAMESPACE}" get secret fx-demo-postgresql >/dev/null 2>&1; then
+  echo "Preserving the existing PostgreSQL password secret."
+else
+  require_nonempty POSTGRES_PASSWORD
+  kubectl -n "${FX_NAMESPACE}" create secret generic fx-demo-postgresql \
+    --from-literal="password=${POSTGRES_PASSWORD}" \
+    --dry-run=client -o yaml | kubectl apply -f -
+fi
+
+helm upgrade --install fx-demo "${PROJECT_ROOT}/deploy/helm/fx-demo" \
+  --namespace "${FX_NAMESPACE}" \
+  --values "${PROJECT_ROOT}/deploy/values/values-eks.yaml" \
+  --values "${application_image_values}" \
+  --set-string "datadog.site=${DD_SITE}" \
+  --set-string "datadog.secretName=${datadog_secret_name}" \
+  --set-string "datadog.dsm.orderStateServiceEnabled=${FX_DEMO_DSM_FULL_TOPOLOGY}" \
+  --wait \
+  --timeout 15m
+
+restart_datadog_agents datadog
+kubectl -n "${FX_NAMESPACE}" wait kafka/fx-kafka --for=condition=Ready --timeout=15m
+# Helm can create application pods before the admission controller is ready on
+# a first install. Restart them after the Agent so tracer injection is certain.
+for service in "${FX_DEMO_SERVICES[@]}"; do
+  kubectl -n "${FX_NAMESPACE}" rollout restart "deployment/${service}"
+  wait_for_rollout "${service}"
+done
+
+# Verify the configured application references and every running demo image.
+expected_application_images=()
+for service in "${FX_DEMO_SERVICES[@]}"; do
+  expected="$(jq -er --arg service "${service}" '.image.references[$service]' "${application_image_values}")"
+  expected_application_images+=("${expected}")
+  actual="$(kubectl -n "${FX_NAMESPACE}" get deployment "${service}" -o jsonpath='{.spec.template.spec.containers[0].image}')"
+  [[ "${actual}" == "${expected}" ]] || die "Unexpected deployed image for ${service}: ${actual}"
+done
+
+is_expected_application_image() {
+  local candidate="$1"
+  local expected_image
+  for expected_image in "${expected_application_images[@]}"; do
+    [[ "${candidate}" == "${expected_image}" ]] && return 0
+  done
+  return 1
+}
+
+for namespace in strimzi-system datadog "${FX_NAMESPACE}"; do
+  while IFS= read -r image; do
+    [[ -z "${image}" ]] && continue
+    [[ "${image}" == *@sha256:* ]] || die "Unpinned image in namespace ${namespace}: ${image}"
+    if is_expected_application_image "${image}"; then
+      continue
+    fi
+    case "${image}" in
+      docker.io/library/postgres:*|quay.io/strimzi/*|registry.datadoghq.com/*) ;;
+      *) die "Unexpected image registry in namespace ${namespace}: ${image}" ;;
+    esac
+  done < <(kubectl -n "${namespace}" get pods -o jsonpath='{range .items[*].spec.initContainers[*]}{.image}{"\n"}{end}{range .items[*].spec.containers[*]}{.image}{"\n"}{end}' | sort -u)
+done
+echo "All runtime images are pinned to the selected application references or reviewed third-party digests."
+echo "EKS application deployment completed."

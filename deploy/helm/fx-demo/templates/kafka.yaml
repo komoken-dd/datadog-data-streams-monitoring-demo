@@ -1,0 +1,46 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: combined
+  labels:
+    strimzi.io/cluster: {{ .Values.kafka.name }}
+spec:
+  replicas: {{ .Values.kafka.replicas }}
+  roles:
+    - controller
+    - broker
+  storage:
+    type: persistent-claim
+    size: {{ .Values.kafka.storage.size }}
+    deleteClaim: {{ .Values.kafka.storage.deleteClaim }}
+    {{- if .Values.kafka.storage.class }}
+    class: {{ .Values.kafka.storage.class }}
+    {{- end }}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: {{ .Values.kafka.name }}
+  labels:
+    {{- include "fx-demo.labels" . | nindent 4 }}
+spec:
+  kafka:
+    version: {{ .Values.kafka.version | quote }}
+    image: {{ .Values.kafka.image | quote }}
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      default.replication.factor: {{ .Values.kafka.replicationFactor }}
+      min.insync.replicas: {{ .Values.kafka.minInSyncReplicas }}
+      offsets.topic.replication.factor: {{ .Values.kafka.replicationFactor }}
+      transaction.state.log.replication.factor: {{ .Values.kafka.replicationFactor }}
+      transaction.state.log.min.isr: {{ .Values.kafka.minInSyncReplicas }}
+      num.partitions: {{ .Values.kafka.partitions }}
+  entityOperator:
+    topicOperator:
+      image: {{ .Values.kafka.entityOperatorImage | quote }}
+    userOperator:
+      image: {{ .Values.kafka.entityOperatorImage | quote }}

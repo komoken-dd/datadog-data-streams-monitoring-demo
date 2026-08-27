@@ -1,0 +1,33 @@
+name: Question
+description: Ask about setup, instrumentation, or the demo behavior
+title: "[Question] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, customer information, production payloads, or unsanitized logs.
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What are you trying to learn or accomplish?
+    validations:
+      required: true
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What you tried
+      description: Include relevant commands and sanitized output.
+  - type: checkboxes
+    id: sanitized
+    attributes:
+      label: Data handling
+      options:
+        - label: I removed credentials, customer information, production payloads, and other sensitive data.
+          required: true

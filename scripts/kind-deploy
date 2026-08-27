@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+source "${PROJECT_ROOT}/scripts/image-sources.sh"
+
+require_command kubectl
+require_command helm
+require_command openssl
+require_exact_context "kind-fx-demo"
+
+readonly IMAGE_TAG="${IMAGE_TAG:-0.1.0}"
+readonly REPOSITORY_PREFIX="${REPOSITORY_PREFIX:-localhost/fx-demo}"
+readonly FX_DEMO_IMAGE_SOURCE="${FX_DEMO_IMAGE_SOURCE:-release}"
+readonly FX_DEMO_DSM_FULL_TOPOLOGY="${FX_DEMO_DSM_FULL_TOPOLOGY:-false}"
+
+require_boolean FX_DEMO_DSM_FULL_TOPOLOGY
+require_image_source "${FX_DEMO_IMAGE_SOURCE}"
+
+image_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/fx-demo-images.XXXXXX")"
+cleanup_images() {
+  case "${image_work_dir}" in
+    "${TMPDIR:-/tmp}"/fx-demo-images.*) rm -rf -- "${image_work_dir}" ;;
+    *) echo "Refusing to remove unexpected image directory: ${image_work_dir}" >&2 ;;
+  esac
+}
+trap cleanup_images EXIT
+
+image_values_file=""
+if [[ "${FX_DEMO_IMAGE_SOURCE}" == "release" ]]; then
+  require_nonempty FX_DEMO_RELEASE
+  image_values_file="${image_work_dir}/fx-demo-images-${FX_DEMO_RELEASE}.json"
+  download_and_verify_release_image_values "${FX_DEMO_RELEASE}" "${image_values_file}"
+else
+  require_command podman
+  require_command kind
+  require_nonempty REPOSITORY_PREFIX
+
+  images=()
+  for service in "${FX_DEMO_SERVICES[@]}"; do
+    image="${REPOSITORY_PREFIX}/${service}:${IMAGE_TAG}"
+    podman image exists "${image}" || {
+      echo "Missing local image ${image}; run scripts/build-images first." >&2
+      exit 1
+    }
+    images+=("${image}")
+  done
+
+  archive="${image_work_dir}/fx-demo-images.tar"
+  podman save \
+    --format docker-archive \
+    --multi-image-archive \
+    --output "${archive}" \
+    "${images[@]}"
+  KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive \
+    --name fx-demo \
+    "${archive}"
+fi
+
+require_datadog_credentials
+kubectl create namespace datadog --dry-run=client -o yaml | kubectl apply -f -
+# For externally managed Secrets, adapt this local-only deployment step.
+apply_datadog_secret datadog datadog-secret
+
+kubectl create namespace "${FX_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+if ! kubectl -n "${FX_NAMESPACE}" get secret fx-demo-postgresql >/dev/null 2>&1; then
+  local_db_password="$(openssl rand -hex 24)"
+  kubectl -n "${FX_NAMESPACE}" create secret generic fx-demo-postgresql \
+    --from-literal="password=${local_db_password}"
+  unset local_db_password
+fi
+
+helm_args=(
+  upgrade --install fx-demo "${PROJECT_ROOT}/deploy/helm/fx-demo"
+  --namespace "${FX_NAMESPACE}"
+  --create-namespace
+  --values "${PROJECT_ROOT}/deploy/values/values-kind.yaml"
+  --set-string "datadog.dsm.orderStateServiceEnabled=${FX_DEMO_DSM_FULL_TOPOLOGY}"
+  --set-string "datadog.site=${DD_SITE}"
+  --wait
+  --timeout 10m
+)
+if [[ "${FX_DEMO_IMAGE_SOURCE}" == "release" ]]; then
+  helm_args+=(--values "${image_values_file}")
+else
+  helm_args+=(
+    --set-string "image.repositoryPrefix=${REPOSITORY_PREFIX}"
+    --set-string "image.tag=${IMAGE_TAG}"
+    --set-string "version=${IMAGE_TAG}"
+  )
+fi
+helm "${helm_args[@]}"
+
+kubectl -n "${FX_NAMESPACE}" wait pod/postgresql-0 --for=condition=Ready --timeout=5m
+kubectl -n "${FX_NAMESPACE}" wait kafka/fx-kafka --for=condition=Ready --timeout=10m
+kubectl -n "${FX_NAMESPACE}" wait kafkatopic --all --for=condition=Ready --timeout=10m
+restart_datadog_agents datadog
+# Restart application pods only after the admission controller is ready so
+# every Java process starts with the pinned tracer injected.
+for service in "${FX_DEMO_SERVICES[@]}"; do
+  kubectl -n "${FX_NAMESPACE}" rollout restart "deployment/${service}"
+  wait_for_rollout "${service}"
+done
+
+echo "The local FX pipeline is ready and exporting telemetry to ${DD_SITE}."

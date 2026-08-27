@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+
+action="${1:-}"
+
+if [[ -z "${action}" ]]; then
+  echo "Usage: scripts/datadog-terraform <init|validate|test|plan|apply|output|destroy-plan|destroy-apply>" >&2
+  exit 1
+fi
+
+require_command terraform
+
+readonly terraform_dir="${PROJECT_ROOT}/infra/datadog-terraform"
+readonly data_dir="${terraform_dir}/.terraform"
+readonly test_data_dir="${terraform_dir}/.terraform-test"
+readonly plan_dir="${terraform_dir}/.terraform-plans"
+readonly plan_file="${plan_dir}/fx-demo.tfplan"
+readonly destroy_plan_file="${plan_dir}/fx-demo-destroy.tfplan"
+readonly state_file="${FX_DEMO_TF_STATE:-${terraform_dir}/.terraform-state/terraform.tfstate}"
+readonly var_file="${FX_DEMO_TFVARS:-${terraform_dir}/local.auto.tfvars}"
+export TF_DATA_DIR="${data_dir}"
+
+initialize() {
+  mkdir -p "$(dirname "${state_file}")" "${data_dir}"
+  terraform -chdir="${terraform_dir}" init \
+    -input=false \
+    -reconfigure \
+    -backend-config="path=${state_file}"
+}
+
+require_tfvars() {
+  if [[ ! -f "${var_file}" ]]; then
+    echo "Missing Terraform variables: ${var_file}" >&2
+    echo "Copy ${terraform_dir}/example.tfvars to ${var_file} and replace the placeholder values." >&2
+    exit 1
+  fi
+}
+
+preflight() {
+  require_tfvars
+  require_nonempty DD_SITE
+  require_datadog_credentials
+  echo "Terraform state: ${state_file}"
+  echo "Terraform variables: ${var_file}"
+}
+
+case "${action}" in
+  init)
+    initialize
+    ;;
+  validate)
+    initialize
+    terraform -chdir="${terraform_dir}" validate
+    ;;
+  test)
+    mkdir -p "${test_data_dir}"
+    TF_DATA_DIR="${test_data_dir}" terraform -chdir="${terraform_dir}" init \
+      -input=false \
+      -backend=false
+    TF_DATA_DIR="${test_data_dir}" terraform -chdir="${terraform_dir}" test
+    ;;
+  plan)
+    initialize
+    preflight
+    mkdir -p "${plan_dir}"
+    terraform -chdir="${terraform_dir}" plan \
+      -var-file="${var_file}" \
+      -out="${plan_file}"
+    echo "Saved plan: ${plan_file}"
+    ;;
+  apply)
+    initialize
+    preflight
+    if [[ ! -f "${plan_file}" ]]; then
+      echo "Missing saved plan: ${plan_file}. Run the plan action first." >&2
+      exit 1
+    fi
+    terraform -chdir="${terraform_dir}" apply "${plan_file}"
+    ;;
+  output)
+    initialize
+    terraform -chdir="${terraform_dir}" output
+    ;;
+  destroy-plan)
+    initialize
+    preflight
+    mkdir -p "${plan_dir}"
+    terraform -chdir="${terraform_dir}" plan \
+      -destroy \
+      -var-file="${var_file}" \
+      -out="${destroy_plan_file}"
+    echo "Saved destroy plan: ${destroy_plan_file}"
+    ;;
+  destroy-apply)
+    initialize
+    preflight
+    if [[ "${CONFIRM_DATADOG_DESTROY:-}" != "fx-demo" ]]; then
+      echo "Refusing to destroy: set CONFIRM_DATADOG_DESTROY=fx-demo." >&2
+      exit 1
+    fi
+    if [[ ! -f "${destroy_plan_file}" ]]; then
+      echo "Missing saved destroy plan: ${destroy_plan_file}. Run destroy-plan first." >&2
+      exit 1
+    fi
+    terraform -chdir="${terraform_dir}" apply "${destroy_plan_file}"
+    ;;
+  *)
+    echo "Unknown action: ${action}" >&2
+    exit 1
+    ;;
+esac

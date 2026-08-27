@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+
+require_command kubectl
+require_command curl
+
+target="${1:-}"
+action="${2:-}"
+
+case "${target}" in
+  kind) expected_context="kind-fx-demo" ;;
+  eks)
+    require_nonempty FX_DEMO_EKS_CONTEXT
+    expected_context="${FX_DEMO_EKS_CONTEXT}"
+    ;;
+  *) echo "Usage: scripts/demo-control <kind|eks> <baseline|stop|surge|delay|failure|redrive>" >&2; exit 1 ;;
+esac
+require_exact_context "${expected_context}"
+
+pids=()
+cleanup() {
+  for pid in "${pids[@]:-}"; do kill "${pid}" 2>/dev/null || true; done
+}
+trap cleanup EXIT
+
+call_control() {
+  local service="$1"
+  local port="$2"
+  local path="$3"
+  start_port_forward "${service}" "${port}"
+  pids+=("${PORT_FORWARD_PID}")
+  curl -fsS -X POST "http://127.0.0.1:${port}${path}"
+  echo
+}
+
+case "${action}" in
+  baseline)
+    call_control order-generator 18081 /internal/demo/baseline
+    call_control execution-adapter 18082 /internal/demo/recover
+    ;;
+  stop) call_control order-generator 18081 /internal/demo/stop ;;
+  surge) call_control order-generator 18081 /internal/demo/surge ;;
+  delay) call_control execution-adapter 18082 /internal/demo/delay ;;
+  failure) call_control order-generator 18081 /internal/demo/processing-failure ;;
+  redrive) call_control dead-letter-service 18083 /internal/demo/redrive ;;
+  *) echo "Unknown action: ${action}" >&2; exit 1 ;;
+esac

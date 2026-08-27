@@ -1,0 +1,24 @@
+ARG RUNTIME_IMAGE=docker.io/library/eclipse-temurin@sha256:303903ac5a77a7efe42a0ccd7f158458c472ac4426fc0e49816f1d904933c8df
+FROM --platform=$BUILDPLATFORM ${RUNTIME_IMAGE} AS extractor
+ARG JAR_FILE=target/*.jar
+WORKDIR /build
+COPY ${JAR_FILE} application.jar
+RUN java -Djarmode=tools -jar application.jar \
+    extract --layers --destination extracted
+
+FROM ${RUNTIME_IMAGE}
+ARG VCS_REF=unknown
+ARG IMAGE_VERSION=unknown
+ARG IMAGE_CREATED=2026-01-01T00:00:00Z
+WORKDIR /app
+COPY --from=extractor /build/extracted/dependencies/ ./
+COPY --from=extractor /build/extracted/spring-boot-loader/ ./
+COPY --from=extractor /build/extracted/snapshot-dependencies/ ./
+COPY --from=extractor /build/extracted/application/ ./
+USER 10001:10001
+EXPOSE 8080
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "application.jar"]
+LABEL org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${IMAGE_VERSION}" \
+      org.opencontainers.image.created="${IMAGE_CREATED}" \
+      org.opencontainers.image.source="https://github.com/komoken-dd/datadog-data-streams-monitoring-demo"

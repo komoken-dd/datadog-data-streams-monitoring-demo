@@ -1,0 +1,23 @@
+environment: local
+image:
+  # Used by the explicit self-built path. The recommended release path adds
+  # service-specific GHCR tag+digest references from the signed image lock.
+  repositoryPrefix: localhost/fx-demo
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
+kafka:
+  replicas: 1
+  partitions: 3
+  replicationFactor: 1
+  minInSyncReplicas: 1
+  storage:
+    size: 5Gi
+    deleteClaim: true
+postgresql:
+  createSecret: false
+  persistence:
+    enabled: false
+datadog:
+  clusterName: fx-demo-kind
+  clusterAgentReplicas: 1
+  kubeletTlsVerify: false

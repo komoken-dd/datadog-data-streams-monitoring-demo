@@ -1,0 +1,58 @@
+name: Bug report
+description: Report reproducible behavior that appears incorrect
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include credentials, customer information, production payloads, or unsanitized logs.
+        Report security vulnerabilities through the repository's private vulnerability reporting page.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: dropdown
+    id: environment
+    attributes:
+      label: Environment
+      options:
+        - kind
+        - Amazon EKS
+        - Build or static validation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: revision
+    attributes:
+      label: Version or commit
+      placeholder: v1.0.0 or a commit SHA
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include commands and configuration needed to reproduce the problem, with secrets removed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: checkboxes
+    id: sanitized
+    attributes:
+      label: Data handling
+      options:
+        - label: I removed credentials, customer information, production payloads, and other sensitive data.
+          required: true
