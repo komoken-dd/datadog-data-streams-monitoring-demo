@@ -1,4 +1,4 @@
-ARG RUNTIME_IMAGE=docker.io/library/eclipse-temurin@sha256:303903ac5a77a7efe42a0ccd7f158458c472ac4426fc0e49816f1d904933c8df
+ARG RUNTIME_IMAGE=docker.io/library/eclipse-temurin@sha256:90d16ab1a11c66a6c38483c773f5b3396821b7cf820fe26b895e3c91ffa2dc39
 FROM --platform=$BUILDPLATFORM ${RUNTIME_IMAGE} AS extractor
 ARG JAR_FILE=target/*.jar
 WORKDIR /build
