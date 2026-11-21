@@ -104,5 +104,5 @@ datadog:
   agentImageTag: 7.82.3@sha256:abb3279b6465f8641eff1ee7cc2bea293221accafc8f0a9a256e4e4835dc8e17
   clusterAgentImageName: cluster-agent
   clusterAgentImageTag: 7.82.3@sha256:fb934c106ef1c27c84f46030c292006bfbebfa850c8a58668dc9b0d1215c9838
-  javaTracerImage: registry.datadoghq.com/dd-lib-java-init:v1.64.2@sha256:dd576c003508f47643c33a0e0d3d947553f5f730e1b0174e1abcc564362cf8d3
+  javaTracerImage: registry.datadoghq.com/dd-lib-java-init:v1.69.1@sha256:183a30acef6027881a2c7fd4f78f066412d32eecfa7e84f84b9dd5d0bc807341
   apmInjectorImage: registry.datadoghq.com/apm-inject:0.66.0@sha256:4e6ecdc36bbfb13da98de46797b4a192b511b6195f75a762fd6eb90962e45a06
