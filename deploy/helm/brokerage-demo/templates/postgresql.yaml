@@ -4,7 +4,7 @@ kind: Secret
 metadata:
   name: {{ .Values.postgresql.secretName }}
   labels:
-    {{- include "fx-demo.labels" . | nindent 4 }}
+    {{- include "brokerage-demo.labels" . | nindent 4 }}
 type: Opaque
 stringData:
   password: {{ .Values.postgresql.password | quote }}
@@ -15,7 +15,7 @@ kind: Service
 metadata:
   name: postgresql
   labels:
-    {{- include "fx-demo.labels" . | nindent 4 }}
+    {{- include "brokerage-demo.labels" . | nindent 4 }}
     app.kubernetes.io/name: postgresql
 spec:
   clusterIP: None
@@ -30,7 +30,7 @@ kind: StatefulSet
 metadata:
   name: postgresql
   labels:
-    {{- include "fx-demo.labels" . | nindent 4 }}
+    {{- include "brokerage-demo.labels" . | nindent 4 }}
     app.kubernetes.io/name: postgresql
 spec:
   serviceName: postgresql
@@ -42,7 +42,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: postgresql
-        app.kubernetes.io/part-of: fx-demo
+        app.kubernetes.io/part-of: brokerage-demo
     spec:
       automountServiceAccountToken: false
       securityContext:

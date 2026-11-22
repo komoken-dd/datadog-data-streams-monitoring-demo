@@ -5,7 +5,7 @@ kind: Deployment
 metadata:
   name: {{ .name }}
   labels:
-    {{- include "fx-demo.labels" $ | nindent 4 }}
+    {{- include "brokerage-demo.labels" $ | nindent 4 }}
     app.kubernetes.io/name: {{ .name }}
     tags.datadoghq.com/env: {{ $.Values.environment | quote }}
     tags.datadoghq.com/service: {{ .name | quote }}
@@ -19,7 +19,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: {{ .name }}
-        app.kubernetes.io/part-of: fx-demo
+        app.kubernetes.io/part-of: brokerage-demo
         tags.datadoghq.com/env: {{ $.Values.environment | quote }}
         tags.datadoghq.com/service: {{ .name | quote }}
         tags.datadoghq.com/version: {{ $.Values.version | quote }}
@@ -79,15 +79,39 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: status.hostIP
-            {{- if eq .name "order-generator" }}
+            {{- if eq .name "order-flow-simulator" }}
+            - name: ORDER_SERVICE_URL
+              value: "http://order-service:8080"
+            - name: EXCHANGE_GATEWAY_URL
+              value: "http://exchange-gateway-simulator:8080"
             - name: BASELINE_PER_SECOND
-              value: {{ $.Values.generator.baselinePerSecond | quote }}
-            - name: SURGE_PER_SECOND
-              value: {{ $.Values.generator.surgePerSecond | quote }}
-            - name: SURGE_DURATION_SECONDS
-              value: {{ $.Values.generator.surgeDurationSeconds | quote }}
+              value: {{ $.Values.simulator.baselinePerSecond | quote }}
+            - name: OPENING_RUSH_PER_SECOND
+              value: {{ $.Values.simulator.openingRushPerSecond | quote }}
+            - name: OPENING_RUSH_SECONDS
+              value: {{ $.Values.simulator.openingRushSeconds | quote }}
+            - name: SELL_OFF_PER_SECOND
+              value: {{ $.Values.simulator.sellOffPerSecond | quote }}
+            - name: SELL_OFF_SECONDS
+              value: {{ $.Values.simulator.sellOffSeconds | quote }}
             - name: ORDER_TRAFFIC_SEED
-              value: {{ $.Values.generator.trafficSeed | quote }}
+              value: {{ $.Values.simulator.trafficSeed | quote }}
+            {{- end }}
+            {{- if eq .name "order-service" }}
+            - name: BUYING_POWER_SERVICE_URL
+              value: "http://buying-power-service:8080"
+            {{- end }}
+            {{- if eq .name "buying-power-service" }}
+            - name: SLOW_REFLECTION_DELAY_MS
+              value: {{ $.Values.buyingPower.slowReflectionDelayMs | quote }}
+            {{- end }}
+            {{- if eq .name "trade-report-service" }}
+            - name: SETTLEMENT_CYCLE_DAYS
+              value: {{ $.Values.tradeReport.settlementCycleDays | quote }}
+            {{- end }}
+            {{- if eq .name "notification-service" }}
+            - name: PUSH_GATEWAY_URL
+              value: "http://push-gateway-simulator:8080"
             {{- end }}
             {{- if .database }}
             - name: DATABASE_URL
@@ -128,7 +152,7 @@ kind: Service
 metadata:
   name: {{ .name }}
   labels:
-    {{- include "fx-demo.labels" $ | nindent 4 }}
+    {{- include "brokerage-demo.labels" $ | nindent 4 }}
     app.kubernetes.io/name: {{ .name }}
 spec:
   type: ClusterIP

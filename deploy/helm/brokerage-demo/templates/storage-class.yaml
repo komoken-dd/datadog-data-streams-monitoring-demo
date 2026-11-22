@@ -4,7 +4,7 @@ kind: StorageClass
 metadata:
   name: {{ .Values.storageClass.name }}
   labels:
-    {{- include "fx-demo.labels" . | nindent 4 }}
+    {{- include "brokerage-demo.labels" . | nindent 4 }}
 provisioner: ebs.csi.aws.com
 volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true

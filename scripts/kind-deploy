@@ -7,37 +7,37 @@ source "${PROJECT_ROOT}/scripts/image-sources.sh"
 require_command kubectl
 require_command helm
 require_command openssl
-require_exact_context "kind-fx-demo"
+require_exact_context "kind-brokerage-demo"
 
 readonly IMAGE_TAG="${IMAGE_TAG:-0.1.0}"
-readonly REPOSITORY_PREFIX="${REPOSITORY_PREFIX:-localhost/fx-demo}"
-readonly FX_DEMO_IMAGE_SOURCE="${FX_DEMO_IMAGE_SOURCE:-release}"
-readonly FX_DEMO_DSM_FULL_TOPOLOGY="${FX_DEMO_DSM_FULL_TOPOLOGY:-false}"
+readonly REPOSITORY_PREFIX="${REPOSITORY_PREFIX:-localhost/brokerage-demo}"
+readonly BROKERAGE_DEMO_IMAGE_SOURCE="${BROKERAGE_DEMO_IMAGE_SOURCE:-release}"
+readonly BROKERAGE_DEMO_DSM_FULL_TOPOLOGY="${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY:-false}"
 
-require_boolean FX_DEMO_DSM_FULL_TOPOLOGY
-require_image_source "${FX_DEMO_IMAGE_SOURCE}"
+require_boolean BROKERAGE_DEMO_DSM_FULL_TOPOLOGY
+require_image_source "${BROKERAGE_DEMO_IMAGE_SOURCE}"
 
-image_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/fx-demo-images.XXXXXX")"
+image_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/brokerage-demo-images.XXXXXX")"
 cleanup_images() {
   case "${image_work_dir}" in
-    "${TMPDIR:-/tmp}"/fx-demo-images.*) rm -rf -- "${image_work_dir}" ;;
+    "${TMPDIR:-/tmp}"/brokerage-demo-images.*) rm -rf -- "${image_work_dir}" ;;
     *) echo "Refusing to remove unexpected image directory: ${image_work_dir}" >&2 ;;
   esac
 }
 trap cleanup_images EXIT
 
 image_values_file=""
-if [[ "${FX_DEMO_IMAGE_SOURCE}" == "release" ]]; then
-  require_nonempty FX_DEMO_RELEASE
-  image_values_file="${image_work_dir}/fx-demo-images-${FX_DEMO_RELEASE}.json"
-  download_and_verify_release_image_values "${FX_DEMO_RELEASE}" "${image_values_file}"
+if [[ "${BROKERAGE_DEMO_IMAGE_SOURCE}" == "release" ]]; then
+  require_nonempty BROKERAGE_DEMO_RELEASE
+  image_values_file="${image_work_dir}/brokerage-demo-images-${BROKERAGE_DEMO_RELEASE}.json"
+  download_and_verify_release_image_values "${BROKERAGE_DEMO_RELEASE}" "${image_values_file}"
 else
   require_command podman
   require_command kind
   require_nonempty REPOSITORY_PREFIX
 
   images=()
-  for service in "${FX_DEMO_SERVICES[@]}"; do
+  for service in "${BROKERAGE_DEMO_SERVICES[@]}"; do
     image="${REPOSITORY_PREFIX}/${service}:${IMAGE_TAG}"
     podman image exists "${image}" || {
       echo "Missing local image ${image}; run scripts/build-images first." >&2
@@ -46,14 +46,14 @@ else
     images+=("${image}")
   done
 
-  archive="${image_work_dir}/fx-demo-images.tar"
+  archive="${image_work_dir}/brokerage-demo-images.tar"
   podman save \
     --format docker-archive \
     --multi-image-archive \
     --output "${archive}" \
     "${images[@]}"
   KIND_EXPERIMENTAL_PROVIDER=podman kind load image-archive \
-    --name fx-demo \
+    --name brokerage-demo \
     "${archive}"
 fi
 
@@ -62,25 +62,25 @@ kubectl create namespace datadog --dry-run=client -o yaml | kubectl apply -f -
 # For externally managed Secrets, adapt this local-only deployment step.
 apply_datadog_secret datadog datadog-secret
 
-kubectl create namespace "${FX_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
-if ! kubectl -n "${FX_NAMESPACE}" get secret fx-demo-postgresql >/dev/null 2>&1; then
+kubectl create namespace "${BROKERAGE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+if ! kubectl -n "${BROKERAGE_NAMESPACE}" get secret brokerage-demo-postgresql >/dev/null 2>&1; then
   local_db_password="$(openssl rand -hex 24)"
-  kubectl -n "${FX_NAMESPACE}" create secret generic fx-demo-postgresql \
+  kubectl -n "${BROKERAGE_NAMESPACE}" create secret generic brokerage-demo-postgresql \
     --from-literal="password=${local_db_password}"
   unset local_db_password
 fi
 
 helm_args=(
-  upgrade --install fx-demo "${PROJECT_ROOT}/deploy/helm/fx-demo"
-  --namespace "${FX_NAMESPACE}"
+  upgrade --install brokerage-demo "${PROJECT_ROOT}/deploy/helm/brokerage-demo"
+  --namespace "${BROKERAGE_NAMESPACE}"
   --create-namespace
   --values "${PROJECT_ROOT}/deploy/values/values-kind.yaml"
-  --set-string "datadog.dsm.orderStateServiceEnabled=${FX_DEMO_DSM_FULL_TOPOLOGY}"
+  --set-string "datadog.dsm.orderStateServiceEnabled=${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}"
   --set-string "datadog.site=${DD_SITE}"
   --wait
   --timeout 10m
 )
-if [[ "${FX_DEMO_IMAGE_SOURCE}" == "release" ]]; then
+if [[ "${BROKERAGE_DEMO_IMAGE_SOURCE}" == "release" ]]; then
   helm_args+=(--values "${image_values_file}")
 else
   helm_args+=(
@@ -91,15 +91,15 @@ else
 fi
 helm "${helm_args[@]}"
 
-kubectl -n "${FX_NAMESPACE}" wait pod/postgresql-0 --for=condition=Ready --timeout=5m
-kubectl -n "${FX_NAMESPACE}" wait kafka/fx-kafka --for=condition=Ready --timeout=10m
-kubectl -n "${FX_NAMESPACE}" wait kafkatopic --all --for=condition=Ready --timeout=10m
+kubectl -n "${BROKERAGE_NAMESPACE}" wait pod/postgresql-0 --for=condition=Ready --timeout=5m
+kubectl -n "${BROKERAGE_NAMESPACE}" wait kafka/brokerage-kafka --for=condition=Ready --timeout=10m
+kubectl -n "${BROKERAGE_NAMESPACE}" wait kafkatopic --all --for=condition=Ready --timeout=10m
 restart_datadog_agents datadog
 # Restart application pods only after the admission controller is ready so
 # every Java process starts with the pinned tracer injected.
-for service in "${FX_DEMO_SERVICES[@]}"; do
-  kubectl -n "${FX_NAMESPACE}" rollout restart "deployment/${service}"
+for service in "${BROKERAGE_DEMO_SERVICES[@]}"; do
+  kubectl -n "${BROKERAGE_NAMESPACE}" rollout restart "deployment/${service}"
   wait_for_rollout "${service}"
 done
 
-echo "The local FX pipeline is ready and exporting telemetry to ${DD_SITE}."
+echo "The local brokerage pipeline is ready and exporting telemetry to ${DD_SITE}."

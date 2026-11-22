@@ -27,14 +27,14 @@ readonly BUILD_PLATFORM="linux/${podman_arch}"
 case "${TARGET}" in
   kind)
     detected_platform="${BUILD_PLATFORM}"
-    REPOSITORY_PREFIX="${REPOSITORY_PREFIX:-localhost/fx-demo}"
+    REPOSITORY_PREFIX="${REPOSITORY_PREFIX:-localhost/brokerage-demo}"
     IMAGE_TAG="${IMAGE_TAG:-0.1.0}"
     ;;
   eks)
     require_command kubectl
-    require_nonempty FX_DEMO_EKS_CONTEXT
-    require_exact_context "${FX_DEMO_EKS_CONTEXT}"
-    eks_node_architectures="$(kubectl --context "${FX_DEMO_EKS_CONTEXT}" get nodes \
+    require_nonempty BROKERAGE_DEMO_EKS_CONTEXT
+    require_exact_context "${BROKERAGE_DEMO_EKS_CONTEXT}"
+    eks_node_architectures="$(kubectl --context "${BROKERAGE_DEMO_EKS_CONTEXT}" get nodes \
       -o jsonpath='{range .items[*]}{.status.nodeInfo.architecture}{"\n"}{end}' \
       | sed '/^$/d' | LC_ALL=C sort -u)"
     case "${eks_node_architectures}" in
@@ -73,13 +73,13 @@ fi
 readonly vcs_ref
 echo "Source revision: ${vcs_ref}"
 
-selected_services=("${FX_DEMO_SERVICES[@]}")
+selected_services=("${BROKERAGE_DEMO_SERVICES[@]}")
 if [[ $# -gt 0 ]]; then
   selected_services=("$@")
 fi
 
 for service in "${selected_services[@]}"; do
-  if [[ " ${FX_DEMO_SERVICES[*]} " != *" ${service} "* ]]; then
+  if [[ " ${BROKERAGE_DEMO_SERVICES[*]} " != *" ${service} "* ]]; then
     echo "Unknown service: ${service}" >&2
     exit 1
   fi
@@ -93,7 +93,7 @@ push_work_dir=""
 cleanup_push_work_dir() {
   [[ -z "${push_work_dir}" ]] && return 0
   case "${push_work_dir}" in
-    "${TMPDIR:-/tmp}"/fx-demo-push.*) rm -rf -- "${push_work_dir}" ;;
+    "${TMPDIR:-/tmp}"/brokerage-demo-push.*) rm -rf -- "${push_work_dir}" ;;
     *) echo "Refusing to remove unexpected push directory: ${push_work_dir}" >&2 ;;
   esac
 }
@@ -102,7 +102,7 @@ trap cleanup_push_work_dir EXIT
 pushed_references=()
 if [[ "${TARGET}" == "eks" && "${PUSH}" == "true" ]]; then
   require_command jq
-  push_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/fx-demo-push.XXXXXX")"
+  push_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/brokerage-demo-push.XXXXXX")"
 fi
 
 maven_modules="$(IFS=,; echo "${selected_services[*]}")"
@@ -149,22 +149,22 @@ for service in "${selected_services[@]}"; do
 done
 
 if [[ "${TARGET}" == "eks" && "${PUSH}" == "true" ]]; then
-  readonly FX_DEMO_IMAGE_VALUES_FILE="${FX_DEMO_IMAGE_VALUES_FILE:-${PROJECT_ROOT}/deploy/values/values-self-built.json}"
+  readonly BROKERAGE_DEMO_IMAGE_VALUES_FILE="${BROKERAGE_DEMO_IMAGE_VALUES_FILE:-${PROJECT_ROOT}/deploy/values/values-self-built.json}"
   references_json='{}'
-  for index in "${!FX_DEMO_SERVICES[@]}"; do
+  for index in "${!BROKERAGE_DEMO_SERVICES[@]}"; do
     references_json="$(jq -cn \
       --argjson references "${references_json}" \
-      --arg service "${FX_DEMO_SERVICES[$index]}" \
+      --arg service "${BROKERAGE_DEMO_SERVICES[$index]}" \
       --arg reference "${pushed_references[$index]}" \
       '$references + {($service): $reference}')"
   done
-  mkdir -p "$(dirname "${FX_DEMO_IMAGE_VALUES_FILE}")"
+  mkdir -p "$(dirname "${BROKERAGE_DEMO_IMAGE_VALUES_FILE}")"
   temporary_values_file="${push_work_dir}/values-self-built.json"
   jq -n \
     --arg version "${IMAGE_TAG}" \
     --argjson references "${references_json}" \
     '{version: $version, image: {references: $references}}' >"${temporary_values_file}"
-  mv "${temporary_values_file}" "${FX_DEMO_IMAGE_VALUES_FILE}"
-  validate_self_built_image_values "${FX_DEMO_IMAGE_VALUES_FILE}"
-  echo "Self-built image values written to ${FX_DEMO_IMAGE_VALUES_FILE}"
+  mv "${temporary_values_file}" "${BROKERAGE_DEMO_IMAGE_VALUES_FILE}"
+  validate_self_built_image_values "${BROKERAGE_DEMO_IMAGE_VALUES_FILE}"
+  echo "Self-built image values written to ${BROKERAGE_DEMO_IMAGE_VALUES_FILE}"
 fi

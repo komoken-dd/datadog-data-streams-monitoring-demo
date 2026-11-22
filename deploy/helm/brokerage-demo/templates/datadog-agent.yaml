@@ -11,9 +11,11 @@ metadata:
         actions_allowlist:
           - "com.datadoghq.http.request"
         http_allowlist:
-          - "order-generator.fx-demo.svc.cluster.local"
-          - "execution-adapter.fx-demo.svc.cluster.local"
-          - "dead-letter-service.fx-demo.svc.cluster.local"
+          - "order-flow-simulator.brokerage-demo.svc.cluster.local"
+          - "exchange-gateway-simulator.brokerage-demo.svc.cluster.local"
+          - "buying-power-service.brokerage-demo.svc.cluster.local"
+          - "push-gateway-simulator.brokerage-demo.svc.cluster.local"
+          - "exception-management-service.brokerage-demo.svc.cluster.local"
     cluster-agent.datadoghq.com/private-action-runner-enabled: "true"
     cluster-agent.datadoghq.com/private-action-runner-configdata: |
       private_action_runner:
@@ -21,9 +23,11 @@ metadata:
         actions_allowlist:
           - "com.datadoghq.http.request"
         http_allowlist:
-          - "order-generator.fx-demo.svc.cluster.local"
-          - "execution-adapter.fx-demo.svc.cluster.local"
-          - "dead-letter-service.fx-demo.svc.cluster.local"
+          - "order-flow-simulator.brokerage-demo.svc.cluster.local"
+          - "exchange-gateway-simulator.brokerage-demo.svc.cluster.local"
+          - "buying-power-service.brokerage-demo.svc.cluster.local"
+          - "push-gateway-simulator.brokerage-demo.svc.cluster.local"
+          - "exception-management-service.brokerage-demo.svc.cluster.local"
 spec:
   global:
     clusterName: {{ .Values.datadog.clusterName | quote }}

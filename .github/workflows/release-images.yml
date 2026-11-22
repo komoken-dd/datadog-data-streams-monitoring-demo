@@ -74,16 +74,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           services=(
-            order-generator
+            order-flow-simulator
             order-service
-            pre-trade-control-service
-            execution-adapter
-            position-service
-            risk-service
-            confirmation-service
-            settlement-service
+            buying-power-service
+            exchange-gateway-simulator
+            holdings-service
+            trade-report-service
+            notification-service
+            push-gateway-simulator
             order-state-service
-            dead-letter-service
+            exception-management-service
           )
           jars=()
           for service in "${services[@]}"; do
@@ -119,16 +119,16 @@ jobs:
       max-parallel: 10
       matrix:
         service:
-          - order-generator
+          - order-flow-simulator
           - order-service
-          - pre-trade-control-service
-          - execution-adapter
-          - position-service
-          - risk-service
-          - confirmation-service
-          - settlement-service
+          - buying-power-service
+          - exchange-gateway-simulator
+          - holdings-service
+          - trade-report-service
+          - notification-service
+          - push-gateway-simulator
           - order-state-service
-          - dead-letter-service
+          - exception-management-service
     steps:
       - name: Check out the released source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -352,16 +352,16 @@ jobs:
         run: |
           set -Eeuo pipefail
           services=(
-            order-generator
+            order-flow-simulator
             order-service
-            pre-trade-control-service
-            execution-adapter
-            position-service
-            risk-service
-            confirmation-service
-            settlement-service
+            buying-power-service
+            exchange-gateway-simulator
+            holdings-service
+            trade-report-service
+            notification-service
+            push-gateway-simulator
             order-state-service
-            dead-letter-service
+            exception-management-service
           )
           release_tag="${{ needs.build-java.outputs.release-tag }}"
           references='{}'
@@ -388,7 +388,7 @@ jobs:
               '. + {($service): $reference}' <<<"${references}")"
           done
 
-          asset="fx-demo-images-${release_tag}.json"
+          asset="brokerage-demo-images-${release_tag}.json"
           jq --null-input --sort-keys \
             --arg tag "${release_tag}" \
             --arg source_revision "${{ needs.build-java.outputs.source-sha }}" \

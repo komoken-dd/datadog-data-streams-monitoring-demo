@@ -9,8 +9,8 @@ readonly SERVICE="${1:-order-service}"
 readonly RUN_ID="$$"
 readonly TAG_A="repro-${RUN_ID}-a"
 readonly TAG_B="repro-${RUN_ID}-b"
-readonly IMAGE_A="localhost/fx-demo/${SERVICE}:${TAG_A}"
-readonly IMAGE_B="localhost/fx-demo/${SERVICE}:${TAG_B}"
+readonly IMAGE_A="localhost/brokerage-demo/${SERVICE}:${TAG_A}"
+readonly IMAGE_B="localhost/brokerage-demo/${SERVICE}:${TAG_B}"
 
 sha256_file() {
   local path="$1"

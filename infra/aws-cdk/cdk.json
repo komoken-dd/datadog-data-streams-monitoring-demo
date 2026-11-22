@@ -1,5 +1,5 @@
 {
-  "app": "npx ts-node --prefer-ts-exts bin/fx-demo.ts",
+  "app": "npx ts-node --prefer-ts-exts bin/brokerage-demo.ts",
   "context": {
     "@aws-cdk/aws-eks:clusterHandlerSecurityGroup-noIngress": true,
     "@aws-cdk/aws-ec2:restrictDefaultSecurityGroup": true

@@ -1,13 +1,13 @@
 {{- $topics := list
-  "fx.orders.received.v1"
-  "fx.orders.approved.v1"
-  "fx.orders.rejected.v1"
-  "fx.trades.executed.v1"
-  "fx.trades.confirmed.v1"
-  "fx.settlements.instructed.v1"
-  "fx.execution.retry.5s.v1"
-  "fx.execution.retry.30s.v1"
-  "fx.execution.dlt.v1" }}
+  "brokerage.orders.accepted.v1"
+  "brokerage.executions.v1"
+  "brokerage.orders.expired.v1"
+  "brokerage.buying-power.updated.v1"
+  "brokerage.trade-reports.issued.v1"
+  "brokerage.notifications.delivered.v1"
+  "brokerage.notifications.retry.5s.v1"
+  "brokerage.notifications.retry.30s.v1"
+  "brokerage.notifications.dlt.v1" }}
 {{- range $topics }}
 ---
 apiVersion: kafka.strimzi.io/v1

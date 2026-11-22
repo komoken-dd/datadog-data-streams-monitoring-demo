@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import * as cdk from "aws-cdk-lib";
-import { FxDemoStack } from "../lib/fx-demo-stack";
+import { BrokerageDemoStack } from "../lib/brokerage-demo-stack";
 
 const app = new cdk.App();
 
-new FxDemoStack(app, "FxDemoStack", {
+new BrokerageDemoStack(app, "BrokerageDemoStack", {
   env: {
     account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.FX_DEMO_AWS_REGION ?? "us-west-2",
+    region: process.env.BROKERAGE_DEMO_AWS_REGION ?? "us-west-2",
   },
   description: "Datadog Data Streams Monitoring demo on Amazon EKS",
 });

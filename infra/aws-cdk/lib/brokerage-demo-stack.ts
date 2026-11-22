@@ -5,14 +5,14 @@ import * as iam from "aws-cdk-lib/aws-iam";
 import { KubectlV36Layer } from "@aws-cdk/lambda-layer-kubectl-v36";
 import { Construct } from "constructs";
 
-export class FxDemoStack extends cdk.Stack {
+export class BrokerageDemoStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    const adminCidr = requiredEnvironment("FX_DEMO_ADMIN_CIDR");
-    const operatorRoleArn = requiredEnvironment("FX_DEMO_ADMIN_ROLE_ARN");
+    const adminCidr = requiredEnvironment("BROKERAGE_DEMO_ADMIN_CIDR");
+    const operatorRoleArn = requiredEnvironment("BROKERAGE_DEMO_ADMIN_ROLE_ARN");
     const nodeInstanceType = new ec2.InstanceType(
-      process.env.FX_DEMO_NODE_INSTANCE_TYPE ?? "m8g.xlarge",
+      process.env.BROKERAGE_DEMO_NODE_INSTANCE_TYPE ?? "m8g.xlarge",
     );
     const nodeArchitecture = nodeInstanceType.architecture;
     const nodeAmiType = nodeArchitecture === ec2.InstanceArchitecture.ARM_64
@@ -21,11 +21,11 @@ export class FxDemoStack extends cdk.Stack {
     // Preserve the existing x86_64 physical names while giving ARM64
     // deployments names that accurately describe their worker architecture.
     const nodeResourceName = nodeArchitecture === ec2.InstanceArchitecture.ARM_64
-      ? "fx-demo-arm64"
-      : "fx-demo-x86";
+      ? "brokerage-demo-arm64"
+      : "brokerage-demo-x86";
 
     if (!/^arn:aws:iam::\d{12}:role\/.+/.test(operatorRoleArn)) {
-      throw new Error("FX_DEMO_ADMIN_ROLE_ARN must be an IAM role ARN");
+      throw new Error("BROKERAGE_DEMO_ADMIN_ROLE_ARN must be an IAM role ARN");
     }
 
     const projectTags = {
@@ -37,7 +37,7 @@ export class FxDemoStack extends cdk.Stack {
     }
 
     const vpc = new ec2.Vpc(this, "Vpc", {
-      vpcName: "fx-demo",
+      vpcName: "brokerage-demo",
       ipAddresses: ec2.IpAddresses.cidr("10.80.0.0/16"),
       // EKS requires cluster subnets in at least two Availability Zones even
       // when the demo worker nodes themselves are intentionally single-AZ.
@@ -58,7 +58,7 @@ export class FxDemoStack extends cdk.Stack {
     });
 
     const cluster = new eks.Cluster(this, "Cluster", {
-      clusterName: "fx-demo",
+      clusterName: "brokerage-demo",
       tags: projectTags,
       version: eks.KubernetesVersion.V1_36,
       vpc,
@@ -138,7 +138,7 @@ export class FxDemoStack extends cdk.Stack {
     });
 
     const ebsCsiRole = new iam.CfnRole(this, "EbsCsiRole", {
-      roleName: "fx-demo-ebs-csi",
+      roleName: "brokerage-demo-ebs-csi",
       assumeRolePolicyDocument: {
         Version: "2012-10-17",
         Statement: [{

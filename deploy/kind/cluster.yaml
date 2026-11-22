@@ -1,5 +1,5 @@
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: fx-demo
+name: brokerage-demo
 nodes:
   - role: control-plane
