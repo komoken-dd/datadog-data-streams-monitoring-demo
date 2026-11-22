@@ -13,6 +13,10 @@ spring:
     consumer:
       auto-offset-reset: earliest
       enable-auto-commit: false
+      properties:
+        # The reflection-delay scenario blocks a listener thread per record.
+        max.poll.records: 1
+        max.poll.interval.ms: 120000
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: io.github.komokendd.dsm.brokerage.common.AvroSpecificSerializer
@@ -28,3 +32,6 @@ management:
     port: ${DD_DOGSTATSD_PORT:8125}
     polling-frequency: 10s
 logging.structured.format.console: logstash
+demo.buying-power:
+  normal-reflection-delay-ms: ${NORMAL_REFLECTION_DELAY_MS:0}
+  slow-reflection-delay-ms: ${SLOW_REFLECTION_DELAY_MS:2500}

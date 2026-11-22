@@ -17,3 +17,7 @@ management:
     port: ${DD_DOGSTATSD_PORT:8125}
     polling-frequency: 10s
 logging.structured.format.console: logstash
+demo.buying-power:
+  url: ${BUYING_POWER_SERVICE_URL:http://buying-power-service:8080}
+  connect-timeout: ${BUYING_POWER_CONNECT_TIMEOUT:500ms}
+  read-timeout: ${BUYING_POWER_READ_TIMEOUT:2s}
