@@ -28,3 +28,14 @@ management:
     port: ${DD_DOGSTATSD_PORT:8125}
     polling-frequency: 10s
 logging.structured.format.console: logstash
+server.error.include-message: always
+demo:
+  exchange:
+    seed: ${EXCHANGE_SEED:20261122}
+    match-interval-ms: ${EXCHANGE_MATCH_INTERVAL_MS:250}
+    match-batch-size: ${EXCHANGE_MATCH_BATCH_SIZE:5000}
+    max-working-age-seconds: ${EXCHANGE_MAX_WORKING_AGE_SECONDS:600}
+    full-fill-probability: ${EXCHANGE_FULL_FILL_PROBABILITY:0.6}
+    random-walk-probability: ${EXCHANGE_RANDOM_WALK_PROBABILITY:0.15}
+    sell-pressure-shares-per-tick: ${EXCHANGE_SELL_PRESSURE_SHARES_PER_TICK:1500}
+    completed-retention-minutes: ${EXCHANGE_COMPLETED_RETENTION_MINUTES:60}
