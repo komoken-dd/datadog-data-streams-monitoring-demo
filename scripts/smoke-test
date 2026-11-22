@@ -9,17 +9,17 @@ require_command jq
 
 target="${1:-}"
 case "${target}" in
-  kind) expected_context="kind-fx-demo" ;;
+  kind) expected_context="kind-brokerage-demo" ;;
   eks)
-    require_nonempty FX_DEMO_EKS_CONTEXT
-    expected_context="${FX_DEMO_EKS_CONTEXT}"
+    require_nonempty BROKERAGE_DEMO_EKS_CONTEXT
+    expected_context="${BROKERAGE_DEMO_EKS_CONTEXT}"
     ;;
   *) echo "Usage: scripts/smoke-test <kind|eks>" >&2; exit 1 ;;
 esac
 require_exact_context "${expected_context}"
 
-kubectl -n "${FX_NAMESPACE}" wait kafka/fx-kafka --for=condition=Ready --timeout=5m
-kubectl -n "${FX_NAMESPACE}" wait --for=condition=Available deployment --all --timeout=8m
+kubectl -n "${BROKERAGE_NAMESPACE}" wait kafka/brokerage-kafka --for=condition=Ready --timeout=5m
+kubectl -n "${BROKERAGE_NAMESPACE}" wait --for=condition=Available deployment --all --timeout=8m
 
 pids=()
 cleanup() {
@@ -27,28 +27,31 @@ cleanup() {
 }
 trap cleanup EXIT
 
-start_port_forward order-service 18084
+start_port_forward order-service 18086
 pids+=("${PORT_FORWARD_PID}")
-start_port_forward order-state-service 18085
+start_port_forward order-state-service 18087
 pids+=("${PORT_FORWARD_PID}")
 
-response="$(curl -fsS -X POST http://127.0.0.1:18084/orders \
+# A regular demo account buys one trading unit of a fictional stock at market.
+response="$(curl -fsS -X POST http://127.0.0.1:18086/orders \
   -H 'Content-Type: application/json' \
-  -d '{"currencyPair":"USD/JPY","side":"BUY","quantity":100000.00,"limitPrice":148.250000}')"
+  -d '{"accountId":"A00001","symbol":"D101","side":"BUY","orderType":"MARKET","quantity":100}')"
 order_id="$(jq -er '.orderId' <<<"${response}")"
 echo "Submitted smoke-test order: ${order_id}"
 
-for _ in {1..60}; do
-  if state="$(curl -fsS "http://127.0.0.1:18085/internal/orders/${order_id}" 2>/dev/null)"; then
+for _ in {1..90}; do
+  if state="$(curl -fsS "http://127.0.0.1:18087/internal/orders/${order_id}" 2>/dev/null)"; then
     status="$(jq -r '.status' <<<"${state}")"
-    echo "Observed status: ${status}"
-    if [[ "${status}" == "SETTLEMENT_INSTRUCTED" ]]; then
-      echo "Successful end-to-end pipeline verified."
+    pending="$(jq '[.executions[] | select(.buyingPowerReflectedAt == null or .tradeReportIssuedAt == null or .notificationDeliveredAt == null)] | length' <<<"${state}")"
+    executions="$(jq '.executions | length' <<<"${state}")"
+    echo "Observed status: ${status}, executions: ${executions}, awaiting downstream reflection: ${pending}"
+    if [[ "${status}" == "FILLED" && "${executions}" -gt 0 && "${pending}" -eq 0 ]]; then
+      echo "Order filled; buying power, trade report, and notification reflected for every execution."
       exit 0
     fi
   fi
   sleep 1
 done
 
-echo "Order did not reach SETTLEMENT_INSTRUCTED within 60 seconds." >&2
+echo "Order did not reach FILLED with all executions reflected within 90 seconds." >&2
 exit 1

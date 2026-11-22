@@ -1,0 +1,111 @@
+{
+  "type": "record",
+  "name": "OrderExpiredEvent",
+  "namespace": "io.github.komokendd.dsm.brokerage.schema",
+  "doc": "Working order quantity that expired without being filled.",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string"
+    },
+    {
+      "name": "eventType",
+      "type": "string",
+      "default": "ORDER_EXPIRED"
+    },
+    {
+      "name": "eventVersion",
+      "type": "int",
+      "default": 1
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "accountId",
+      "type": "string"
+    },
+    {
+      "name": "orderId",
+      "type": "string"
+    },
+    {
+      "name": "symbol",
+      "type": "string"
+    },
+    {
+      "name": "side",
+      "type": "string",
+      "doc": "BUY or SELL"
+    },
+    {
+      "name": "demoScenarioId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "orderType",
+      "type": "string"
+    },
+    {
+      "name": "quantity",
+      "type": "long"
+    },
+    {
+      "name": "limitPrice",
+      "type": [
+        "null",
+        {
+          "type": "bytes",
+          "logicalType": "decimal",
+          "precision": 12,
+          "scale": 1
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "reservedAmountJpy",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 0
+      }
+    },
+    {
+      "name": "cumulativeQuantity",
+      "type": "long"
+    },
+    {
+      "name": "expiredQuantity",
+      "type": "long"
+    },
+    {
+      "name": "reason",
+      "type": "string",
+      "doc": "LIMIT_DOWN_UNFILLED or SESSION_CLOSE"
+    },
+    {
+      "name": "acceptedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "expiredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

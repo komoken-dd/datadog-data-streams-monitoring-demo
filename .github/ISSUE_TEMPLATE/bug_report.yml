@@ -25,6 +25,26 @@ body:
         - Other
     validations:
       required: true
+  - type: dropdown
+    id: image-source
+    attributes:
+      label: Application image source
+      options:
+        - Self-built (BROKERAGE_DEMO_IMAGE_SOURCE=self-built)
+        - GitHub release (BROKERAGE_DEMO_RELEASE)
+        - Not applicable
+  - type: dropdown
+    id: scenario
+    attributes:
+      label: Demo scenario
+      description: The scenario running when the problem occurred, if any.
+      options:
+        - None or baseline
+        - opening-rush
+        - buying-power-delay
+        - push-outage or redrive
+        - sell-off
+        - Not applicable
   - type: input
     id: revision
     attributes:

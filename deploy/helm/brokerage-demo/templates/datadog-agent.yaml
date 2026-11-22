@@ -1,0 +1,83 @@
+apiVersion: datadoghq.com/v2alpha1
+kind: DatadogAgent
+metadata:
+  name: datadog
+  namespace: {{ .Values.datadog.namespace }}
+  annotations:
+    agent.datadoghq.com/private-action-runner-enabled: "true"
+    agent.datadoghq.com/private-action-runner-configdata: |
+      private_action_runner:
+        enabled: true
+        actions_allowlist:
+          - "com.datadoghq.http.request"
+        http_allowlist:
+          - "order-flow-simulator.brokerage-demo.svc.cluster.local"
+          - "exchange-gateway-simulator.brokerage-demo.svc.cluster.local"
+          - "buying-power-service.brokerage-demo.svc.cluster.local"
+          - "push-gateway-simulator.brokerage-demo.svc.cluster.local"
+          - "exception-management-service.brokerage-demo.svc.cluster.local"
+    cluster-agent.datadoghq.com/private-action-runner-enabled: "true"
+    cluster-agent.datadoghq.com/private-action-runner-configdata: |
+      private_action_runner:
+        enabled: true
+        actions_allowlist:
+          - "com.datadoghq.http.request"
+        http_allowlist:
+          - "order-flow-simulator.brokerage-demo.svc.cluster.local"
+          - "exchange-gateway-simulator.brokerage-demo.svc.cluster.local"
+          - "buying-power-service.brokerage-demo.svc.cluster.local"
+          - "push-gateway-simulator.brokerage-demo.svc.cluster.local"
+          - "exception-management-service.brokerage-demo.svc.cluster.local"
+spec:
+  global:
+    clusterName: {{ .Values.datadog.clusterName | quote }}
+    site: {{ .Values.datadog.site | quote }}
+    registry: {{ .Values.datadog.registry | quote }}
+    credentials:
+      apiSecret:
+        secretName: {{ .Values.datadog.secretName }}
+        keyName: api-key
+      appSecret:
+        secretName: {{ .Values.datadog.secretName }}
+        keyName: app-key
+    kubelet:
+      tlsVerify: {{ .Values.datadog.kubeletTlsVerify }}
+  features:
+    admissionController:
+      enabled: true
+    apm:
+      enabled: true
+      hostPortConfig:
+        enabled: true
+    dogstatsd:
+      hostPortConfig:
+        enabled: true
+      nonLocalTraffic: true
+      originDetectionEnabled: true
+    logCollection:
+      enabled: true
+      containerCollectAll: true
+    liveContainerCollection:
+      enabled: true
+    orchestratorExplorer:
+      enabled: true
+    remoteConfiguration:
+      enabled: true
+  override:
+    nodeAgent:
+      image:
+        name: {{ .Values.datadog.agentImageName | quote }}
+        tag: {{ .Values.datadog.agentImageTag | quote }}
+    clusterAgent:
+      replicas: {{ .Values.datadog.clusterAgentReplicas }}
+      image:
+        name: {{ .Values.datadog.clusterAgentImageName | quote }}
+        tag: {{ .Values.datadog.clusterAgentImageTag | quote }}
+      containers:
+        cluster-agent:
+          command:
+            - /entrypoint.sh
+          args:
+            - datadog-cluster-agent
+            - start
+            - -E=/etc/datadog-agent/privateactionrunner.yaml

@@ -1,0 +1,142 @@
+{
+  "type": "record",
+  "name": "ExecutionReportEvent",
+  "namespace": "io.github.komokendd.dsm.brokerage.schema",
+  "doc": "One fill reported by the exchange gateway. An order can produce several fills.",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string"
+    },
+    {
+      "name": "eventType",
+      "type": "string",
+      "default": "EXECUTION_REPORTED"
+    },
+    {
+      "name": "eventVersion",
+      "type": "int",
+      "default": 1
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "accountId",
+      "type": "string"
+    },
+    {
+      "name": "orderId",
+      "type": "string"
+    },
+    {
+      "name": "symbol",
+      "type": "string"
+    },
+    {
+      "name": "side",
+      "type": "string",
+      "doc": "BUY or SELL"
+    },
+    {
+      "name": "demoScenarioId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "orderType",
+      "type": "string"
+    },
+    {
+      "name": "quantity",
+      "type": "long"
+    },
+    {
+      "name": "limitPrice",
+      "type": [
+        "null",
+        {
+          "type": "bytes",
+          "logicalType": "decimal",
+          "precision": 12,
+          "scale": 1
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "reservedAmountJpy",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 0
+      }
+    },
+    {
+      "name": "executionId",
+      "type": "string"
+    },
+    {
+      "name": "executionSequence",
+      "type": "int",
+      "doc": "1-based fill number within the order"
+    },
+    {
+      "name": "executedQuantity",
+      "type": "long"
+    },
+    {
+      "name": "executionPrice",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 12,
+        "scale": 1
+      }
+    },
+    {
+      "name": "executionAmountJpy",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 0
+      }
+    },
+    {
+      "name": "cumulativeQuantity",
+      "type": "long"
+    },
+    {
+      "name": "leavesQuantity",
+      "type": "long"
+    },
+    {
+      "name": "orderStatus",
+      "type": "string",
+      "doc": "PARTIALLY_FILLED or FILLED"
+    },
+    {
+      "name": "acceptedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "executedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

@@ -5,15 +5,15 @@
   <modelVersion>4.0.0</modelVersion>
   <parent>
     <groupId>io.github.komokendd</groupId>
-    <artifactId>fx-demo-parent</artifactId>
+    <artifactId>brokerage-demo-parent</artifactId>
     <version>0.1.0-SNAPSHOT</version>
   </parent>
-  <artifactId>fx-demo-common</artifactId>
+  <artifactId>brokerage-demo-common</artifactId>
 
   <dependencies>
     <dependency>
       <groupId>io.github.komokendd</groupId>
-      <artifactId>fx-demo-schemas</artifactId>
+      <artifactId>brokerage-demo-schemas</artifactId>
     </dependency>
     <dependency>
       <groupId>org.springframework.kafka</groupId>

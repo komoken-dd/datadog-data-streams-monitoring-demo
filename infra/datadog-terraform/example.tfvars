@@ -4,6 +4,8 @@ environment         = "REPLACE_WITH_ENVIRONMENT"
 enable_workflows    = false
 
 # Required only when enable_workflows is true. See docs/private-action-runner.md.
-generator_connection_id   = null
-execution_connection_id   = null
-dead_letter_connection_id = null
+simulator_connection_id    = null
+exchange_connection_id     = null
+buying_power_connection_id = null
+push_gateway_connection_id = null
+exception_connection_id    = null

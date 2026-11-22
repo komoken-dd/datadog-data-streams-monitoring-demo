@@ -16,10 +16,10 @@ readonly terraform_dir="${PROJECT_ROOT}/infra/datadog-terraform"
 readonly data_dir="${terraform_dir}/.terraform"
 readonly test_data_dir="${terraform_dir}/.terraform-test"
 readonly plan_dir="${terraform_dir}/.terraform-plans"
-readonly plan_file="${plan_dir}/fx-demo.tfplan"
-readonly destroy_plan_file="${plan_dir}/fx-demo-destroy.tfplan"
-readonly state_file="${FX_DEMO_TF_STATE:-${terraform_dir}/.terraform-state/terraform.tfstate}"
-readonly var_file="${FX_DEMO_TFVARS:-${terraform_dir}/local.auto.tfvars}"
+readonly plan_file="${plan_dir}/brokerage-demo.tfplan"
+readonly destroy_plan_file="${plan_dir}/brokerage-demo-destroy.tfplan"
+readonly state_file="${BROKERAGE_DEMO_TF_STATE:-${terraform_dir}/.terraform-state/terraform.tfstate}"
+readonly var_file="${BROKERAGE_DEMO_TFVARS:-${terraform_dir}/local.auto.tfvars}"
 export TF_DATA_DIR="${data_dir}"
 
 initialize() {
@@ -96,8 +96,8 @@ case "${action}" in
   destroy-apply)
     initialize
     preflight
-    if [[ "${CONFIRM_DATADOG_DESTROY:-}" != "fx-demo" ]]; then
-      echo "Refusing to destroy: set CONFIRM_DATADOG_DESTROY=fx-demo." >&2
+    if [[ "${CONFIRM_DATADOG_DESTROY:-}" != "brokerage-demo" ]]; then
+      echo "Refusing to destroy: set CONFIRM_DATADOG_DESTROY=brokerage-demo." >&2
       exit 1
     fi
     if [[ ! -f "${destroy_plan_file}" ]]; then

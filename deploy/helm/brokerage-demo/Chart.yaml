@@ -1,0 +1,6 @@
+apiVersion: v2
+name: brokerage-demo
+description: Kafka order-processing demo instrumented with Datadog Data Streams Monitoring
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

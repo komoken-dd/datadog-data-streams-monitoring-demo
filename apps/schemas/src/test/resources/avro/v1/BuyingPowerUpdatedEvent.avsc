@@ -1,0 +1,104 @@
+{
+  "type": "record",
+  "name": "BuyingPowerUpdatedEvent",
+  "namespace": "io.github.komokendd.dsm.brokerage.schema",
+  "doc": "Buying power after an execution or expiry was applied.",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string"
+    },
+    {
+      "name": "eventType",
+      "type": "string",
+      "default": "BUYING_POWER_UPDATED"
+    },
+    {
+      "name": "eventVersion",
+      "type": "int",
+      "default": 1
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "accountId",
+      "type": "string"
+    },
+    {
+      "name": "orderId",
+      "type": "string"
+    },
+    {
+      "name": "symbol",
+      "type": "string"
+    },
+    {
+      "name": "side",
+      "type": "string",
+      "doc": "BUY or SELL"
+    },
+    {
+      "name": "demoScenarioId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "sourceEventId",
+      "type": "string"
+    },
+    {
+      "name": "sourceEventType",
+      "type": "string"
+    },
+    {
+      "name": "sourceOccurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "cashBalanceJpy",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 0
+      }
+    },
+    {
+      "name": "reservedAmountJpy",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 0
+      },
+      "doc": "Total cash still reserved for the account"
+    },
+    {
+      "name": "buyingPowerJpy",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 0
+      }
+    },
+    {
+      "name": "reflectedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

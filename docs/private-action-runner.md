@@ -1,15 +1,15 @@
 # Agent-based Private Action Runner setup
 
-This project can expose its six demo actions as buttons on the Datadog
+This project can expose its seven demo actions as buttons on the Datadog
 dashboard. The buttons run Workflow Automation workflows, and an Agent-based
-Private Action Runner (PAR) calls three Kubernetes `ClusterIP` services. The
+Private Action Runner (PAR) calls five Kubernetes `ClusterIP` services. The
 control endpoints are never exposed through an Ingress or public load balancer.
 
 PAR is optional. If you only want the application, DSM, and dashboard, keep
 `enable_workflows = false` and use:
 
 ```bash
-scripts/demo-control <kind|eks> <baseline|stop|surge|delay|failure|redrive>
+scripts/demo-control <kind|eks> <baseline|stop|opening-rush|sell-off|buying-power-delay|push-outage|redrive>
 ```
 
 ## 1. Prepare the Datadog Application Key
@@ -44,8 +44,8 @@ The chart follows Datadog's Kubernetes Operator pattern:
 
 - the node Agent and Cluster Agent annotations enable PAR in both supported
   execution locations
-- both configurations allow only `com.datadoghq.http.request` and the three
-  demo service hostnames
+- both configurations allow only `com.datadoghq.http.request` and the five
+  demo service hostnames in the `brokerage-demo` namespace
 - the Cluster Agent `-E=/etc/datadog-agent/privateactionrunner.yaml` argument
   loads the generated PAR configuration file
 
@@ -69,18 +69,23 @@ Then open **Actions > Private Action Runners** in Datadog and confirm that the
 runner for the intended cluster is healthy. Do not continue if the displayed
 cluster is not the one this dashboard should control.
 
-## 4. Create three Private HTTP Connections
+## 4. Create five Private HTTP Connections
 
 Open **Workflow Automation > Connections**, select **New Connection > HTTP**,
 and create one Connection for each row. Set **Type** to **Private Action
 Runner**, select the runner verified above, and use **No authentication** for
 this synthetic demo.
 
-| Suggested name | Base URL |
-|---|---|
-| `fx-demo-generator` | `http://order-generator.fx-demo.svc.cluster.local:8080` |
-| `fx-demo-execution` | `http://execution-adapter.fx-demo.svc.cluster.local:8080` |
-| `fx-demo-dead-letter` | `http://dead-letter-service.fx-demo.svc.cluster.local:8080` |
+| Suggested name | Base URL | Terraform variable | Used by |
+|---|---|---|---|
+| `brokerage-demo-simulator` | `http://order-flow-simulator.brokerage-demo.svc.cluster.local:8080` | `simulator_connection_id` | ベースラインに戻す, 注文フロー停止, 寄付き集中, 材料による売り殺到 |
+| `brokerage-demo-exchange` | `http://exchange-gateway-simulator.brokerage-demo.svc.cluster.local:8080` | `exchange_connection_id` | ベースラインに戻す |
+| `brokerage-demo-buying-power` | `http://buying-power-service.brokerage-demo.svc.cluster.local:8080` | `buying_power_connection_id` | ベースラインに戻す, 買付余力の反映遅延 |
+| `brokerage-demo-push-gateway` | `http://push-gateway-simulator.brokerage-demo.svc.cluster.local:8080` | `push_gateway_connection_id` | ベースラインに戻す, プッシュ通知事業者の障害 |
+| `brokerage-demo-exception` | `http://exception-management-service.brokerage-demo.svc.cluster.local:8080` | `exception_connection_id` | 未達通知の再送 (Redrive) |
+
+These are the same five hostnames as the Helm chart's PAR `http_allowlist`.
+A base URL for any other host is rejected by the runner.
 
 No authentication is acceptable here only because the endpoints are
 demo-only, `ClusterIP`-only, and additionally constrained by the runner's HTTP
@@ -96,18 +101,33 @@ dashboard or vice versa.
 In the target's ignored `.tfvars` file, set:
 
 ```hcl
-enable_workflows          = true
-generator_connection_id   = "REPLACE_WITH_GENERATOR_CONNECTION_UUID"
-execution_connection_id   = "REPLACE_WITH_EXECUTION_CONNECTION_UUID"
-dead_letter_connection_id = "REPLACE_WITH_DEAD_LETTER_CONNECTION_UUID"
+enable_workflows           = true
+simulator_connection_id    = "REPLACE_WITH_SIMULATOR_CONNECTION_UUID"
+exchange_connection_id     = "REPLACE_WITH_EXCHANGE_CONNECTION_UUID"
+buying_power_connection_id = "REPLACE_WITH_BUYING_POWER_CONNECTION_UUID"
+push_gateway_connection_id = "REPLACE_WITH_PUSH_GATEWAY_CONNECTION_UUID"
+exception_connection_id    = "REPLACE_WITH_EXCEPTION_CONNECTION_UUID"
 ```
 
 Run `scripts/datadog-terraform plan` and inspect the plan before applying it.
-The three IDs are optional only while `enable_workflows` is false. Terraform
+The five IDs are optional only while `enable_workflows` is false. Terraform
 rejects missing, zero, or malformed IDs when workflows are enabled.
 
-After apply, run **Reset to Baseline** from **Operator Controls** and verify its
-Workflow run history before trying the failure scenario.
+Apply creates seven workflows, each with a dashboard button on the
+**デモ操作** (Operator Controls) tab:
+
+| Workflow | Button | Endpoint |
+|---|---|---|
+| 証券デモ - ベースラインに戻す | **ベースラインに戻す** | Four steps: simulator `/internal/demo/baseline`, exchange `/internal/demo/reset`, buying-power `/internal/demo/recover`, push gateway `/internal/demo/recover` |
+| 証券デモ - 注文フロー停止 | **注文フロー停止** | simulator `/internal/demo/stop` |
+| 証券デモ - 寄付き集中 | **寄付き集中 · 60秒** | simulator `/internal/demo/opening-rush` |
+| 証券デモ - 材料による売り殺到 · D105 | **材料による売り殺到 · D105** | simulator `/internal/demo/sell-off` |
+| 証券デモ - 買付余力の反映遅延 | **買付余力の反映遅延** | buying-power `/internal/demo/delay` |
+| 証券デモ - プッシュ通知事業者の障害 | **プッシュ通知事業者の障害** | push gateway `/internal/demo/outage` |
+| 証券デモ - 未達通知の再送 (Redrive) | **未達通知の再送 (Redrive)** | exception management `/internal/demo/redrive` |
+
+After apply, run **ベースラインに戻す** (Reset to Baseline) from **デモ操作** (Operator Controls) and verify its
+Workflow run history before trying the other scenarios.
 
 ## Official documentation
 

@@ -9,7 +9,7 @@ require_command kind
 require_command kubectl
 require_command helm
 
-readonly CLUSTER_NAME="fx-demo"
+readonly CLUSTER_NAME="brokerage-demo"
 readonly EXPECTED_CONTEXT="kind-${CLUSTER_NAME}"
 readonly STRIMZI_CHART_VERSION="${STRIMZI_OPERATOR_IMAGE_TAG}"
 readonly DATADOG_OPERATOR_CHART_VERSION="2.25.1"
@@ -80,5 +80,5 @@ helm upgrade --install datadog-operator datadog/datadog-operator \
   --wait \
   --timeout 5m
 
-kubectl create namespace "${FX_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace "${BROKERAGE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 echo "kind cluster and required operators are ready."

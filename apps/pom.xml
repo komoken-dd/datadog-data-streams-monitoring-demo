@@ -12,23 +12,23 @@
   </parent>
 
   <groupId>io.github.komokendd</groupId>
-  <artifactId>fx-demo-parent</artifactId>
+  <artifactId>brokerage-demo-parent</artifactId>
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
 
   <modules>
     <module>schemas</module>
     <module>common</module>
-    <module>order-generator</module>
+    <module>order-flow-simulator</module>
     <module>order-service</module>
-    <module>pre-trade-control-service</module>
-    <module>execution-adapter</module>
-    <module>position-service</module>
-    <module>risk-service</module>
-    <module>confirmation-service</module>
-    <module>settlement-service</module>
+    <module>buying-power-service</module>
+    <module>exchange-gateway-simulator</module>
+    <module>holdings-service</module>
+    <module>trade-report-service</module>
+    <module>notification-service</module>
+    <module>push-gateway-simulator</module>
     <module>order-state-service</module>
-    <module>dead-letter-service</module>
+    <module>exception-management-service</module>
   </modules>
 
   <properties>
@@ -48,12 +48,12 @@
     <dependencies>
       <dependency>
         <groupId>io.github.komokendd</groupId>
-        <artifactId>fx-demo-schemas</artifactId>
+        <artifactId>brokerage-demo-schemas</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>
         <groupId>io.github.komokendd</groupId>
-        <artifactId>fx-demo-common</artifactId>
+        <artifactId>brokerage-demo-common</artifactId>
         <version>${project.version}</version>
       </dependency>
       <dependency>

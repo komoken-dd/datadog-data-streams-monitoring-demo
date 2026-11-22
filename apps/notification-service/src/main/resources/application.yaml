@@ -1,0 +1,31 @@
+spring:
+  application.name: notification-service
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:brokerage-kafka-kafka-bootstrap:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        # Retry listeners hold one record until it is due; a single record per poll keeps that
+        # wait (up to 30 s plus one push attempt) well inside the poll interval.
+        max.poll.records: 1
+        max.poll.interval.ms: 120000
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.github.komokendd.dsm.brokerage.common.AvroSpecificSerializer
+      acks: all
+      properties.enable.idempotence: true
+    template.observation-enabled: true
+management:
+  endpoints.web.exposure.include: health,info,metrics
+  statsd.metrics.export:
+    enabled: ${DD_METRICS_ENABLED:false}
+    flavor: datadog
+    host: ${DD_AGENT_HOST:localhost}
+    port: ${DD_DOGSTATSD_PORT:8125}
+    polling-frequency: 10s
+logging.structured.format.console: logstash
+demo.notification:
+  push-gateway-url: ${PUSH_GATEWAY_URL:http://push-gateway-simulator:8080}
+  connect-timeout: 500ms
+  read-timeout: 1500ms

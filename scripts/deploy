@@ -15,54 +15,54 @@ require_command aws
 require_command helm
 require_command jq
 require_command kubectl
-require_nonempty FX_DEMO_AWS_ACCOUNT_ID
-require_nonempty FX_DEMO_EKS_CONTEXT
+require_nonempty BROKERAGE_DEMO_AWS_ACCOUNT_ID
+require_nonempty BROKERAGE_DEMO_EKS_CONTEXT
 require_nonempty DD_API_KEY
 require_nonempty DD_APP_KEY
 require_nonempty DD_SITE
-readonly FX_DEMO_CREATE_K8S_SECRETS="${FX_DEMO_CREATE_K8S_SECRETS:-true}"
-readonly FX_DEMO_DSM_FULL_TOPOLOGY="${FX_DEMO_DSM_FULL_TOPOLOGY:-false}"
-readonly FX_DEMO_IMAGE_SOURCE="${FX_DEMO_IMAGE_SOURCE:-release}"
-readonly FX_DEMO_IMAGE_VALUES_FILE="${FX_DEMO_IMAGE_VALUES_FILE:-${PROJECT_ROOT}/deploy/values/values-self-built.json}"
-require_boolean FX_DEMO_CREATE_K8S_SECRETS
-require_boolean FX_DEMO_DSM_FULL_TOPOLOGY
-require_image_source "${FX_DEMO_IMAGE_SOURCE}"
+readonly BROKERAGE_DEMO_CREATE_K8S_SECRETS="${BROKERAGE_DEMO_CREATE_K8S_SECRETS:-true}"
+readonly BROKERAGE_DEMO_DSM_FULL_TOPOLOGY="${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY:-false}"
+readonly BROKERAGE_DEMO_IMAGE_SOURCE="${BROKERAGE_DEMO_IMAGE_SOURCE:-release}"
+readonly BROKERAGE_DEMO_IMAGE_VALUES_FILE="${BROKERAGE_DEMO_IMAGE_VALUES_FILE:-${PROJECT_ROOT}/deploy/values/values-self-built.json}"
+require_boolean BROKERAGE_DEMO_CREATE_K8S_SECRETS
+require_boolean BROKERAGE_DEMO_DSM_FULL_TOPOLOGY
+require_image_source "${BROKERAGE_DEMO_IMAGE_SOURCE}"
 
 # Resolve and authenticate immutable image inputs before mutating Kubernetes.
-image_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/fx-demo-images.XXXXXX")"
+image_work_dir="$(mktemp -d "${TMPDIR:-/tmp}/brokerage-demo-images.XXXXXX")"
 readonly image_work_dir
 cleanup_image_work_dir() {
   case "${image_work_dir}" in
-    "${TMPDIR:-/tmp}"/fx-demo-images.*) rm -rf -- "${image_work_dir}" ;;
+    "${TMPDIR:-/tmp}"/brokerage-demo-images.*) rm -rf -- "${image_work_dir}" ;;
     *) echo "Refusing to remove unexpected image directory: ${image_work_dir}" >&2 ;;
   esac
 }
 trap cleanup_image_work_dir EXIT
 
-if [[ "${FX_DEMO_IMAGE_SOURCE}" == "release" ]]; then
-  require_nonempty FX_DEMO_RELEASE
-  application_image_values="${image_work_dir}/fx-demo-images-${FX_DEMO_RELEASE}.json"
-  download_and_verify_release_image_values "${FX_DEMO_RELEASE}" "${application_image_values}"
+if [[ "${BROKERAGE_DEMO_IMAGE_SOURCE}" == "release" ]]; then
+  require_nonempty BROKERAGE_DEMO_RELEASE
+  application_image_values="${image_work_dir}/brokerage-demo-images-${BROKERAGE_DEMO_RELEASE}.json"
+  download_and_verify_release_image_values "${BROKERAGE_DEMO_RELEASE}" "${application_image_values}"
 else
-  application_image_values="${FX_DEMO_IMAGE_VALUES_FILE}"
+  application_image_values="${BROKERAGE_DEMO_IMAGE_VALUES_FILE}"
   validate_self_built_image_values "${application_image_values}"
 fi
 readonly application_image_values
 
-require_exact_context "${FX_DEMO_EKS_CONTEXT}"
+require_exact_context "${BROKERAGE_DEMO_EKS_CONTEXT}"
 account_id="$(aws sts get-caller-identity --region "${AWS_REGION}" --query Account --output text)"
-if [[ ! "${FX_DEMO_AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]; then
-  die "FX_DEMO_AWS_ACCOUNT_ID must be a 12-digit AWS account ID."
+if [[ ! "${BROKERAGE_DEMO_AWS_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]; then
+  die "BROKERAGE_DEMO_AWS_ACCOUNT_ID must be a 12-digit AWS account ID."
 fi
-if [[ "${account_id}" != "${FX_DEMO_AWS_ACCOUNT_ID}" ]]; then
-  die "Refusing to deploy: expected AWS account ${FX_DEMO_AWS_ACCOUNT_ID}, got ${account_id}."
+if [[ "${account_id}" != "${BROKERAGE_DEMO_AWS_ACCOUNT_ID}" ]]; then
+  die "Refusing to deploy: expected AWS account ${BROKERAGE_DEMO_AWS_ACCOUNT_ID}, got ${account_id}."
 fi
-datadog_secret_name="${FX_DEMO_DATADOG_SECRET_NAME:-datadog-secret}"
+datadog_secret_name="${BROKERAGE_DEMO_DATADOG_SECRET_NAME:-datadog-secret}"
 echo "AWS account: ${account_id}"
 echo "AWS region: ${AWS_REGION}"
 echo "Datadog site: ${DD_SITE}"
 echo "Datadog Kubernetes Secret: ${datadog_secret_name}"
-echo "DSM full topology: ${FX_DEMO_DSM_FULL_TOPOLOGY}"
+echo "DSM full topology: ${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}"
 
 require_datadog_credentials
 
@@ -97,47 +97,47 @@ helm upgrade --install datadog-operator datadog/datadog-operator \
   --wait \
   --timeout 5m
 
-kubectl create namespace "${FX_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
-# Set FX_DEMO_CREATE_K8S_SECRETS=false when Secrets are provisioned externally.
-if [[ "${FX_DEMO_CREATE_K8S_SECRETS}" == "true" ]]; then
+kubectl create namespace "${BROKERAGE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+# Set BROKERAGE_DEMO_CREATE_K8S_SECRETS=false when Secrets are provisioned externally.
+if [[ "${BROKERAGE_DEMO_CREATE_K8S_SECRETS}" == "true" ]]; then
   apply_datadog_secret datadog "${datadog_secret_name}"
 else
   kubectl -n datadog get secret "${datadog_secret_name}" >/dev/null
 fi
-if kubectl -n "${FX_NAMESPACE}" get secret fx-demo-postgresql >/dev/null 2>&1; then
+if kubectl -n "${BROKERAGE_NAMESPACE}" get secret brokerage-demo-postgresql >/dev/null 2>&1; then
   echo "Preserving the existing PostgreSQL password secret."
 else
   require_nonempty POSTGRES_PASSWORD
-  kubectl -n "${FX_NAMESPACE}" create secret generic fx-demo-postgresql \
+  kubectl -n "${BROKERAGE_NAMESPACE}" create secret generic brokerage-demo-postgresql \
     --from-literal="password=${POSTGRES_PASSWORD}" \
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-helm upgrade --install fx-demo "${PROJECT_ROOT}/deploy/helm/fx-demo" \
-  --namespace "${FX_NAMESPACE}" \
+helm upgrade --install brokerage-demo "${PROJECT_ROOT}/deploy/helm/brokerage-demo" \
+  --namespace "${BROKERAGE_NAMESPACE}" \
   --values "${PROJECT_ROOT}/deploy/values/values-eks.yaml" \
   --values "${application_image_values}" \
   --set-string "datadog.site=${DD_SITE}" \
   --set-string "datadog.secretName=${datadog_secret_name}" \
-  --set-string "datadog.dsm.orderStateServiceEnabled=${FX_DEMO_DSM_FULL_TOPOLOGY}" \
+  --set-string "datadog.dsm.orderStateServiceEnabled=${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}" \
   --wait \
   --timeout 15m
 
 restart_datadog_agents datadog
-kubectl -n "${FX_NAMESPACE}" wait kafka/fx-kafka --for=condition=Ready --timeout=15m
+kubectl -n "${BROKERAGE_NAMESPACE}" wait kafka/brokerage-kafka --for=condition=Ready --timeout=15m
 # Helm can create application pods before the admission controller is ready on
 # a first install. Restart them after the Agent so tracer injection is certain.
-for service in "${FX_DEMO_SERVICES[@]}"; do
-  kubectl -n "${FX_NAMESPACE}" rollout restart "deployment/${service}"
+for service in "${BROKERAGE_DEMO_SERVICES[@]}"; do
+  kubectl -n "${BROKERAGE_NAMESPACE}" rollout restart "deployment/${service}"
   wait_for_rollout "${service}"
 done
 
 # Verify the configured application references and every running demo image.
 expected_application_images=()
-for service in "${FX_DEMO_SERVICES[@]}"; do
+for service in "${BROKERAGE_DEMO_SERVICES[@]}"; do
   expected="$(jq -er --arg service "${service}" '.image.references[$service]' "${application_image_values}")"
   expected_application_images+=("${expected}")
-  actual="$(kubectl -n "${FX_NAMESPACE}" get deployment "${service}" -o jsonpath='{.spec.template.spec.containers[0].image}')"
+  actual="$(kubectl -n "${BROKERAGE_NAMESPACE}" get deployment "${service}" -o jsonpath='{.spec.template.spec.containers[0].image}')"
   [[ "${actual}" == "${expected}" ]] || die "Unexpected deployed image for ${service}: ${actual}"
 done
 
@@ -150,7 +150,7 @@ is_expected_application_image() {
   return 1
 }
 
-for namespace in strimzi-system datadog "${FX_NAMESPACE}"; do
+for namespace in strimzi-system datadog "${BROKERAGE_NAMESPACE}"; do
   while IFS= read -r image; do
     [[ -z "${image}" ]] && continue
     [[ "${image}" == *@sha256:* ]] || die "Unpinned image in namespace ${namespace}: ${image}"

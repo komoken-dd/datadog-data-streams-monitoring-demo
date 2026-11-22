@@ -1,69 +1,95 @@
 # Demo Runbook
 
-This runbook covers both the local kind and Amazon EKS environments,
-Datadog resources, the demo sequence, and teardown.
+This runbook covers the local kind and Amazon EKS environments, Datadog
+resources, the demo scenarios, and teardown.
 
-## 1. Local validation
-
-Prerequisites:
+## 1. Prerequisites
 
 - Bash on macOS or Linux; on Windows, use WSL2 because the deployment scripts
   do not support native Windows shells
 - Podman 6.0 or later (reference path), or Docker with BuildKit after applying
-  the compatibility substitutions below
-- kind
-- kubectl
-- Helm
+  the [compatibility substitutions](#docker-compatibility-note-not-tested)
+- kind, kubectl, and Helm
 - curl, jq, OpenSSL, and the GitHub CLI
+- Terraform, for the Datadog resources
 - JDK 21 only for running `./mvnw verify` on the host; container image builds
-  do not require a host JDK
+  run Maven in a pinned container and do not require a host JDK
 - A Datadog organization with API and application keys
 
-Use a password manager or secret manager to inject `DD_API_KEY`, `DD_APP_KEY`,
-and `DD_SITE` into the `scripts/kind-deploy` process.
-Keep resolved keys outside the repository and shell history.
+The local stack runs ten JVMs, Kafka, PostgreSQL, and the Datadog Agent in one
+kind node. Give the Podman machine at least 12 GiB of memory; 16 GiB is the
+verified configuration. With 8 GiB the machine thrashes.
 
 ```bash
-cd apps
-./mvnw verify
-cd ..
+podman machine stop
+podman machine set --memory 16384
+podman machine start
+```
 
-export FX_DEMO_RELEASE="v0.1.0"
+Use a password manager or secret manager to inject `DD_API_KEY`, `DD_APP_KEY`,
+and `DD_SITE` into the `scripts/kind-deploy`, `scripts/deploy`, and
+`scripts/datadog-terraform` processes. Keep resolved keys outside the
+repository and shell history.
+
+## 2. Run locally with kind
+
+Building the images yourself is the currently working local path:
+
+```bash
+scripts/kind-up
+TARGET=kind scripts/build-images
+BROKERAGE_DEMO_IMAGE_SOURCE=self-built scripts/kind-deploy
+scripts/smoke-test kind
+```
+
+- `scripts/kind-up` creates the `brokerage-demo` kind cluster with the Podman
+  provider, installs the pinned Strimzi and Datadog Operators, and creates the
+  `brokerage-demo` namespace. It is safe to rerun.
+- `scripts/build-images` builds all ten services as
+  `localhost/brokerage-demo/<service>:0.1.0`. Set `IMAGE_TAG` to use another
+  local tag, and pass the same value to `scripts/kind-deploy`.
+- `scripts/kind-deploy` loads the local images into kind, validates the
+  Datadog site and API/Application Key pair, creates the Kubernetes Secrets,
+  installs the Helm chart, and restarts the applications after the Datadog
+  admission controller is ready so every JVM starts with the tracer injected.
+- `scripts/smoke-test kind` waits for Kafka and every Deployment, submits a
+  market BUY of 100 shares of `D101` from account `A00001`, and waits until
+  the order is `FILLED` with buying power, trade report, and notification
+  reflected for every execution.
+
+After deployment, filter Data Streams Monitoring to `env:local`.
+
+Each deployment, smoke-test, and demo-control script validates the expected
+Kubernetes context and namespace before changing the cluster. Confirm that `kubectl config current-context` is
+`kind-brokerage-demo` before using the local demo-control commands.
+
+Self-built images are not covered by the repository's GitHub Artifact
+Attestations. The person performing the build owns that trust decision.
+
+### Release images
+
+The deployment scripts also support verified multi-architecture GHCR release
+images:
+
+```bash
+export BROKERAGE_DEMO_RELEASE="vX.Y.Z"
 gh auth status
 scripts/kind-up
 scripts/kind-deploy
 scripts/smoke-test kind
 ```
 
-The recommended kind path verifies the published release image lock and its
-GitHub Artifact Attestation, then pulls the same immutable GHCR application
-references used by EKS.
+This path requires a GitHub Release whose image lock contains the ten
+brokerage services. No such release has been published yet. The existing
+`v0.1.0` release predates the online-brokerage domain and does not contain
+these images, so its lock fails validation. Use the self-built path until the
+maintainer publishes a new release. See the
+[container image policy](container-images.md) for what the release path
+verifies.
 
-To build the applications yourself instead, replace the deployment portion
-above with:
+### Build cache and reproducibility
 
-```bash
-scripts/kind-up
-export IMAGE_TAG="YOUR_LOCAL_IMAGE_TAG"
-scripts/build-images
-FX_DEMO_IMAGE_SOURCE=self-built scripts/kind-deploy
-scripts/smoke-test kind
-```
-
-The self-built kind path loads all ten local images into the cluster. Those
-images are not covered by the published release's GitHub Artifact Attestations.
-
-The deploy script validates the target
-Datadog site and API/Application Key pair before creating the local Kubernetes
-Secret.
-After deployment, filter Data Streams Monitoring to `env:local`.
-
-Confirm that `kubectl config current-context` is `kind-fx-demo` before using
-the local demo-control commands. Each script validates the expected context and
-namespace before changing the cluster.
-
-On the self-built path, `scripts/build-images` uses `apps/.m2` as a
-container-only Maven cache. It is
+`scripts/build-images` uses `apps/.m2` as a container-only Maven cache. It is
 ignored by Git and separate from the host Maven cache. It may grow over time;
 depending on the host volume mapping, its files can also have container-derived
 ownership. Delete it when you want to reclaim the space and accept a cold
@@ -103,7 +129,7 @@ Also export the local repository prefix so Docker creates the same image names
 expected by `values-kind.yaml` and `scripts/kind-deploy`:
 
 ```bash
-export REPOSITORY_PREFIX="localhost/fx-demo"
+export REPOSITORY_PREFIX="localhost/brokerage-demo"
 ```
 
 Enable BuildKit (`DOCKER_BUILDKIT=1` on engines where it is not already the
@@ -126,7 +152,11 @@ interfaces. It is not an executed or continuously tested Docker support path:
 - [Docker image save](https://docs.docker.com/reference/cli/docker/image/save/)
 - [kind provider and image loading](https://kind.sigs.k8s.io/docs/user/quick-start/#loading-an-image-into-your-cluster)
 
-## 2. Decide whether EKS is appropriate
+## 3. Decide whether EKS is appropriate
+
+The EKS path uses the same Helm chart and scripts as kind, but the
+online-brokerage services were verified end to end only on kind. Expect to
+validate the EKS path yourself.
 
 The AWS stack creates VPC subnets in two Availability Zones, one NAT gateway,
 an EKS control plane, and one on-demand `m8g.xlarge` ARM64 worker node with EBS
@@ -158,20 +188,19 @@ Before deployment:
 Nothing is automatically destroyed. Use the teardown commands in section 10
 when the environment is no longer needed.
 
-## 3. Create AWS infrastructure
+## 4. Create AWS infrastructure
 
 The EKS path additionally requires an authenticated AWS CLI plus Node.js and
-npm for AWS CDK. The recommended release-image path also requires the GitHub
-CLI for Artifact Attestation verification.
+npm for AWS CDK.
 
 The CDK stack requires:
 
 | Variable | Purpose |
 |---|---|
-| `FX_DEMO_ADMIN_CIDR` | CIDR allowed to reach the public EKS API, normally one `/32` |
-| `FX_DEMO_ADMIN_ROLE_ARN` | IAM role granted EKS cluster-admin access |
-| `FX_DEMO_NODE_INSTANCE_TYPE` | Optional worker type; defaults to `m8g.xlarge`. CDK selects the matching x86_64 or ARM64 EKS AMI automatically. |
-| `FX_DEMO_AWS_REGION` | Optional AWS region; defaults to `us-west-2` |
+| `BROKERAGE_DEMO_ADMIN_CIDR` | CIDR allowed to reach the public EKS API, normally one `/32` |
+| `BROKERAGE_DEMO_ADMIN_ROLE_ARN` | IAM role granted EKS cluster-admin access |
+| `BROKERAGE_DEMO_NODE_INSTANCE_TYPE` | Optional worker type; defaults to `m8g.xlarge`. CDK selects the matching x86_64 or ARM64 EKS AMI automatically. |
+| `BROKERAGE_DEMO_AWS_REGION` | Optional AWS region; defaults to `us-west-2` |
 
 ```bash
 cd infra/aws-cdk
@@ -183,77 +212,72 @@ cd ../..
 ```
 
 CDK does not create image repositories. Private worker nodes use the single NAT
-gateway to pull the recommended application images from public GHCR, or
-optional self-built images from the registry selected by the user. Reviewed
-third-party images come from their official public registries.
+gateway to pull application images from the registry you select, and
+reviewed third-party images from their official public registries.
 
-The recommended path requires HTTPS and DNS resolution for `ghcr.io`, Docker
-Hub, `quay.io`, and `registry.datadoghq.com`; a self-built path also requires
-access to its selected registry. Datadog PrivateLink can
-carry supported telemetry intake traffic, but it does not replace access to
-the Datadog container registry.
+Worker nodes require HTTPS and DNS resolution for Docker Hub, `quay.io`,
+`registry.datadoghq.com`, and the application image registry (`ghcr.io` on the
+release path). Datadog PrivateLink can carry supported telemetry intake
+traffic, but it does not replace access to the Datadog container registry.
 
 Use the stack output to configure kubectl:
 
 ```bash
-aws eks update-kubeconfig --region <region> --name fx-demo
+aws eks update-kubeconfig --region <region> --name brokerage-demo
 kubectl config current-context
 ```
 
-## 4. Select application images
+## 5. Select application images
 
-For both kind and EKS, the recommended source is the public
-multi-architecture application release published by this repository. Select a
-semantic release and authenticate the GitHub CLI so the deploy script can
-verify the release image lock's Artifact Attestation:
+### Self-built images for EKS
+
+Until a release with the brokerage images is published, build and push all ten
+services to a registry the worker nodes can pull from, as one release unit:
 
 ```bash
-export FX_DEMO_RELEASE="v0.1.0"
+export REPOSITORY_PREFIX="REGISTRY/NAMESPACE/brokerage-demo"
+export IMAGE_TAG="YOUR_IMMUTABLE_TAG"
+export BROKERAGE_DEMO_EKS_CONTEXT="EXPECTED_KUBE_CONTEXT"
+TARGET=eks PUSH=true scripts/build-images
+```
+
+The build writes each registry-returned `tag@digest` reference to the ignored
+`deploy/values/values-self-built.json` file. Set
+`BROKERAGE_DEMO_IMAGE_VALUES_FILE` to choose another output path. Do not
+hand-edit this file. Configure Kubernetes pull credentials separately when
+using a private registry. The script detects the selected EKS worker
+architecture; do not set a build platform manually.
+
+Self-built EKS references remain digest-pinned. They are not signed by this
+repository's release workflow or verifiable with its GitHub Artifact
+Attestations. The person performing the build owns that trust decision.
+
+### Release images
+
+Once a release containing the brokerage images exists, select it and
+authenticate the GitHub CLI so the deploy script can verify the release image
+lock's Artifact Attestation:
+
+```bash
+export BROKERAGE_DEMO_RELEASE="vX.Y.Z"
 gh auth status
 ```
 
 Publishing a release builds all ten services from the tagged source, pushes a
 semantic release tag to public GHCR, and generates SBOM, BuildKit provenance,
 and GitHub Artifact Attestations. The workflow also adds
-`fx-demo-images-<release>.json` to the GitHub Release. That lock contains one
-`tag@sha256` reference per service and is passed directly to Helm.
+`brokerage-demo-images-<release>.json` to the GitHub Release. That lock
+contains one `tag@sha256` reference per service and is passed directly to
+Helm.
 
 The deploy script downloads the public lock, validates its schema and all ten
 GHCR references, and verifies that it was signed by this repository's
 `release-images.yml` workflow for the selected tag and source revision. No
-registry login, local application build, ECR repository, or image copy is
-required. See the [container image policy](container-images.md) for the image
-inventory and trust boundaries.
+registry login, local application build, or image copy is required. See the
+[container image policy](container-images.md) for the image inventory and
+trust boundaries.
 
-If you need to inspect, modify, and build the images yourself, the same
-deployment scripts provide an explicit `self-built` path:
-
-- For kind, run `scripts/build-images`, then deploy with
-  `FX_DEMO_IMAGE_SOURCE=self-built scripts/kind-deploy`. The script loads the
-  local images into kind.
-- For EKS, choose a registry the worker nodes can pull from and run all ten
-  builds and pushes as one release unit:
-
-  ```bash
-  export REPOSITORY_PREFIX="REGISTRY/NAMESPACE/fx-demo"
-  export IMAGE_TAG="YOUR_IMMUTABLE_TAG"
-  export FX_DEMO_EKS_CONTEXT="EXPECTED_KUBE_CONTEXT"
-  TARGET=eks PUSH=true scripts/build-images
-  ```
-
-  The build writes each registry-returned `tag@digest` reference to the ignored
-  `deploy/values/values-self-built.json` file. Set
-  `FX_DEMO_IMAGE_VALUES_FILE` to choose another output path. Do not hand-edit
-  this file. Configure Kubernetes pull credentials separately when using a
-  private registry. The script detects the selected EKS worker architecture;
-  do not set a build platform manually.
-
-Self-built EKS references remain digest-pinned; local kind images are selected
-by the exact local tag and loaded directly. Neither is signed by this
-repository's release workflow or verifiable with its GitHub Artifact
-Attestations. The person performing the build owns that trust decision.
-
-## 5. Provide credentials safely
+## 6. Provide credentials safely
 
 The deployment and Terraform commands expect these values in their process
 environment:
@@ -261,7 +285,8 @@ environment:
 - `DD_API_KEY`
 - `DD_APP_KEY`
 - `DD_SITE`
-- `POSTGRES_PASSWORD` when the `fx-demo-postgresql` Secret does not already exist
+- `POSTGRES_PASSWORD` on EKS when the `brokerage-demo-postgresql` Secret does
+  not already exist (kind generates a random local password)
 
 Inject secret values for each command from your password manager or secret
 manager. Do not place them in this repository, an `.env` file, Terraform
@@ -272,53 +297,48 @@ The default deployment path creates these Kubernetes Secrets:
 | Namespace | Secret | Keys |
 |---|---|---|
 | `datadog` | `datadog-secret` | `api-key`, `app-key` |
-| `fx-demo` | `fx-demo-postgresql` | `password` |
+| `brokerage-demo` | `brokerage-demo-postgresql` | `password` |
 
-To provision the Datadog Secret from AWS Secrets Manager or another system, set
-`FX_DEMO_CREATE_K8S_SECRETS=false`; the deployment script then verifies that it
-already exists. Provision `fx-demo-postgresql` separately before deployment if
-PostgreSQL credentials are also managed externally. The script preserves that
-Secret when it already exists; otherwise it creates it from `POSTGRES_PASSWORD`.
+On EKS, to provision the Datadog Secret from AWS Secrets Manager or another
+system, set `BROKERAGE_DEMO_CREATE_K8S_SECRETS=false`; the deployment script
+then verifies that it already exists. `BROKERAGE_DEMO_DATADOG_SECRET_NAME`
+selects a Secret name other than `datadog-secret`. Provision
+`brokerage-demo-postgresql` separately before deployment if PostgreSQL
+credentials are also managed externally. The script preserves that Secret when
+it already exists; otherwise it creates it from `POSTGRES_PASSWORD`.
 
-## 6. Deploy to EKS
+## 7. Deploy to EKS
 
 Set non-secret deployment context values and run the deployment inside the
 credential-injected process:
 
 ```bash
-export FX_DEMO_AWS_ACCOUNT_ID="EXPECTED_12_DIGIT_ACCOUNT_ID"
-export FX_DEMO_EKS_CONTEXT="EXPECTED_KUBE_CONTEXT"
-export FX_DEMO_RELEASE="v0.1.0"
+export BROKERAGE_DEMO_AWS_ACCOUNT_ID="EXPECTED_12_DIGIT_ACCOUNT_ID"
+export BROKERAGE_DEMO_EKS_CONTEXT="EXPECTED_KUBE_CONTEXT"
 
-scripts/deploy eks
+BROKERAGE_DEMO_IMAGE_SOURCE=self-built scripts/deploy eks
 scripts/smoke-test eks
 ```
 
-On the default release path, the deployment verifies the release lock and its
-GitHub Artifact Attestation before mutation. On both image paths, it verifies
-the active Kubernetes context, the active AWS account against
-`FX_DEMO_AWS_ACCOUNT_ID`, the Datadog site, and API/Application Key pair. It
-passes the selected image values to Helm so each application uses its exact
-`tag@digest` reference and `DD_VERSION` uses the selected release-unit tag.
-PostgreSQL, Strimzi, and Datadog use the reviewed official-registry
-references in the chart. After rollout, the script confirms that all
-application images match the selected references and that every runtime image
-includes a digest.
+With a published release, export `BROKERAGE_DEMO_RELEASE` and run
+`scripts/deploy eks` without `BROKERAGE_DEMO_IMAGE_SOURCE`.
 
-To deploy images produced by the optional self-build command in section 4,
-keep the same AWS and Datadog environment variables and run:
+On the self-built path, the script validates the exact ten-service set and
+every `tag@digest` reference in `deploy/values/values-self-built.json` and
+deliberately skips GitHub Artifact Attestation verification. On the release
+path, it verifies the release lock and its Attestation before mutation. On
+both paths, it verifies the active Kubernetes context, the active AWS account
+against `BROKERAGE_DEMO_AWS_ACCOUNT_ID`, the Datadog site, and the
+API/Application Key pair. It passes the selected image values to Helm so each
+application uses its exact `tag@digest` reference and `DD_VERSION` uses the
+selected release-unit tag. PostgreSQL, Strimzi, and Datadog use the reviewed
+official-registry references in the chart. After rollout, the script confirms
+that all application images match the selected references and that every
+runtime image includes a digest.
 
-```bash
-FX_DEMO_IMAGE_SOURCE=self-built scripts/deploy eks
-scripts/smoke-test eks
-```
+After deployment, filter Data Streams Monitoring to `env:demo`.
 
-The deploy script validates the exact ten-service set and every `tag@digest`
-reference in `deploy/values/values-self-built.json`. This path deliberately
-skips GitHub Artifact Attestation verification because the images were not
-produced by the repository's release workflow.
-
-## 7. Create Datadog resources
+## 8. Create Datadog resources
 
 Run the mock-provider regression tests independently of Datadog credentials,
 variable files, and deployment state:
@@ -342,18 +362,17 @@ Replace:
 
 The environment has no default. A dashboard is intentionally tied to one
 environment because its Workflow connections, when enabled, target one concrete
-cluster. To operate kind and EKS concurrently in the same Datadog organization,
-use a separate variable file, Terraform state, and dashboard for each target.
+cluster.
 
 Choose one control mode:
 
-- Keep `enable_workflows = false` and leave all three connection IDs as `null`.
-  The dashboard, monitors, and APM retention filter are created, and all six
-  actions remain available through `scripts/demo-control`.
+- Keep `enable_workflows = false` and leave all five connection IDs as `null`.
+  The dashboard, monitors, metric configuration, and APM retention filter are
+  created, and all actions remain available through `scripts/demo-control`.
 - Follow [Agent-based Private Action Runner setup](private-action-runner.md),
-  set `enable_workflows = true`, and replace all three connection IDs with the
-  resulting Private HTTP Connection UUIDs. This also creates the six Dashboard
-  Workflow controls.
+  set `enable_workflows = true`, and replace all five connection IDs with the
+  resulting Private HTTP Connection UUIDs. This also creates the seven
+  dashboard Workflow controls.
 
 Then run:
 
@@ -365,70 +384,108 @@ scripts/datadog-terraform apply
 scripts/datadog-terraform output
 ```
 
+With workflows disabled, the plan creates 16 resources: the dashboard, three
+monitors, three distribution tag configurations, eight metric metadata entries,
+and the APM retention filter. `output` prints the dashboard URL.
+
 The three `datadog_metric_tag_configuration` resources apply to their
 demo-specific metric names across the Datadog organization, not only to this
-dashboard. The APM retention filter retains all matching demo order spans, and
-the Agent collects all container logs. Review the corresponding custom-metric,
-indexed-span, and log-ingestion usage before leaving the demo running.
+dashboard. Three of them enable the p50/p95/p99 percentiles used by the
+dashboard and the reflection-delay monitor; those widgets stay empty until
+apply. The APM
+retention filter retains all matching demo order spans, and the Agent collects
+all container logs. Review the corresponding custom-metric, indexed-span, and
+log-ingestion usage before leaving the demo running.
 
-The wrapper uses ignored local state by default. When multiple operators need
-the same Terraform state, configure an encrypted remote backend with access
-controls and locking instead of using the local-state wrapper unchanged.
+### Separate state per environment
+
+By default the wrapper uses ignored local state in
+`infra/datadog-terraform/.terraform-state/terraform.tfstate` and the variable
+file `infra/datadog-terraform/local.auto.tfvars`. To keep a separate state and
+dashboard per environment, for example when an organization already has
+resources from another deployment, point both at environment-specific files
+with absolute paths:
+
+```bash
+export BROKERAGE_DEMO_TF_STATE="${PWD}/infra/datadog-terraform/.terraform-state/kind.tfstate"
+export BROKERAGE_DEMO_TFVARS="${PWD}/infra/datadog-terraform/kind.tfvars"
+scripts/datadog-terraform plan
+scripts/datadog-terraform apply
+```
+
+Keep the same two variables set for every later `plan`, `apply`, `output`, and
+destroy command against that environment. Both example paths are ignored by
+Git. When multiple operators need the same Terraform state, configure an
+encrypted remote backend with access controls and locking instead of using the
+local-state wrapper unchanged.
 
 ## Optional: show the full DSM consumer topology
 
 The default DSM map omits `order-state-service`, whose projection consumes all
-lifecycle topics and can obscure the primary business path. The
-`dead-letter-service` pathway remains enabled, including redrive. To include the
-state projection as well, set the following when running either deployment
-command and keep the same setting for later redeployments:
+nine topics and can obscure the primary business path. The
+`exception-management-service` pathway remains enabled, including redrive. To
+include the state projection as well, set the following when running either
+deployment command and keep the same setting for later redeployments:
 
 ```bash
-export FX_DEMO_DSM_FULL_TOPOLOGY=true
+export BROKERAGE_DEMO_DSM_FULL_TOPOLOGY=true
 ```
 
 Unset it to return to the primary-flow map. See the
 [Datadog learning guide](datadog-learning-guide.md) before comparing the two
 views.
 
-## 8. Core 15-minute demo
+## 9. Run the scenarios
 
-Use the Dashboard button when workflows are enabled, or run the equivalent CLI
-command (`scripts/demo-control <kind|eks> <action>`).
+Use the dashboard button when workflows are enabled, or run the equivalent CLI
+command. The CLI verifies the Kubernetes context, opens a temporary
+port-forward to the ClusterIP control endpoint, and prints the JSON status
+returned by each call. For EKS, export `BROKERAGE_DEMO_EKS_CONTEXT` first.
 
-1. Run **Reset to Baseline** (`baseline`).
-2. Open **Demo Overview** and Data Streams Monitoring.
-3. Explain the main Kafka path and the executed-trade fan-out.
-4. Run **Inject Execution Delay** (`delay`).
-5. Show pending orders, pending fictional USD-equivalent notional, and
-   order-to-execution p95/p99 increasing.
-6. In DSM, identify lag on the approved-order execution pathway.
-7. Use APM and logs to inspect the execution adapter and one `order_id`.
-8. Run **Reset to Baseline** (`baseline`) and watch the backlog drain.
-9. Run **Stop Order Generation** (`stop`) after the demonstration to stop new order intake.
+```bash
+scripts/demo-control kind baseline
+scripts/demo-control kind opening-rush
+scripts/demo-control kind buying-power-delay
+scripts/demo-control kind push-outage
+scripts/demo-control kind redrive
+scripts/demo-control kind sell-off
+scripts/demo-control kind stop
+```
 
-Expected scenario effects should appear within tens of seconds.
+| Action | Effect | Ends |
+|---|---|---|
+| `baseline` | Baseline order flow, exchange reset, buying-power and push-provider recovery | Immediately |
+| `opening-rush` | 60-second pre-open at 25 orders/s, then one opening-auction burst | Returns to baseline automatically |
+| `buying-power-delay` | 2,500 ms extra processing per execution in `buying-power-service` | Until `baseline` |
+| `push-outage` | Push gateway returns 503; notifications move through retries to the DLT | Until `baseline` |
+| `redrive` | Re-sends every unresolved notification dead letter | Immediately; run after `baseline` |
+| `sell-off` | 120 seconds of extra `D105` sell orders down to limit-down | Order flow returns to baseline automatically; `D105` stays at limit-down until `baseline` |
+| `stop` | Stops new orders; accepted orders continue | Until `baseline` |
 
-## 9. Extended failure demo
+Expected effects appear within tens of seconds. See
+[Demo scenarios and presentation steps](demo-presentation-steps.md) for what to
+observe in DSM and on the dashboard in each scenario, with approximate values
+from a local run.
 
-1. Run **Fail Next 10 Orders** (`failure`). Retain the returned scenario ID only if you
-   want to investigate those orders directly.
-2. Show events moving through both retry topics and the dead-letter topic.
-3. Confirm that unresolved dead letters reaches exactly ten.
-4. Run **Redrive All Dead Letters** (`redrive`).
-5. Confirm unresolved dead letters returns to zero and downstream processing
-   completes.
+Run `stop` after the demonstration to stop new order intake.
 
 ## 10. Teardown
 
-Destroy Datadog resources first:
+Destroy Datadog resources first. Keep `BROKERAGE_DEMO_TF_STATE` and
+`BROKERAGE_DEMO_TFVARS` set if you used them for this environment.
 
 ```bash
 scripts/datadog-terraform destroy-plan
-CONFIRM_DATADOG_DESTROY=fx-demo scripts/datadog-terraform destroy-apply
+CONFIRM_DATADOG_DESTROY=brokerage-demo scripts/datadog-terraform destroy-apply
 ```
 
-Then review and destroy AWS resources:
+Delete the local kind cluster:
+
+```bash
+KIND_EXPERIMENTAL_PROVIDER=podman kind delete cluster --name brokerage-demo
+```
+
+Review and destroy AWS resources:
 
 ```bash
 cd infra/aws-cdk

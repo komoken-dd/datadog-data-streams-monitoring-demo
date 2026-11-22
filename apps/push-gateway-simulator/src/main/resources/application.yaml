@@ -1,0 +1,15 @@
+spring:
+  application.name: push-gateway-simulator
+management:
+  endpoints.web.exposure.include: health,info,metrics
+  statsd.metrics.export:
+    enabled: ${DD_METRICS_ENABLED:false}
+    flavor: datadog
+    host: ${DD_AGENT_HOST:localhost}
+    port: ${DD_DOGSTATSD_PORT:8125}
+    polling-frequency: 10s
+logging.structured.format.console: logstash
+demo.push:
+  # Idempotency window by notification_id; far longer than any retry or redrive delay.
+  dedupe-capacity: ${PUSH_DEDUPE_CAPACITY:200000}
+  outage-response-delay: ${PUSH_OUTAGE_RESPONSE_DELAY:800ms}

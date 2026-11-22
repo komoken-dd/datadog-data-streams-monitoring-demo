@@ -9,6 +9,41 @@ Strimzi, and Datadog directly from their official registries in either case.
 The recommended path does not require a private ECR registry and does not copy
 third-party images under the user's identity.
 
+No release containing the online-brokerage images has been published yet. The
+existing `v0.1.0` release predates the online-brokerage domain, so the
+self-built path is currently the only working path for these services. The
+release path described below becomes available once the maintainer publishes a
+new release.
+
+## Application images
+
+The application consists of ten services, each built from `apps/<service>` with
+the shared `apps/Containerfile`:
+
+```text
+order-flow-simulator
+order-service
+buying-power-service
+exchange-gateway-simulator
+holdings-service
+trade-report-service
+notification-service
+push-gateway-simulator
+order-state-service
+exception-management-service
+```
+
+| Path | Image reference |
+|---|---|
+| Release (GHCR) | `ghcr.io/komoken-dd/datadog-data-streams-monitoring-demo/<service>:<release>@sha256:<digest>` |
+| Self-built for kind | `localhost/brokerage-demo/<service>:<IMAGE_TAG>` (default tag `0.1.0`) |
+| Self-built for EKS | `<REPOSITORY_PREFIX>/<service>:<IMAGE_TAG>@sha256:<digest>` |
+
+The release image lock is the GitHub Release asset
+`brokerage-demo-images-<release>.json`. The self-built EKS equivalent is
+`deploy/values/values-self-built.json`. Both files are Helm values files with
+one reference per service under `image.references`.
+
 `config/container-images.sh` is the reviewed image lock. It records a readable
 version tag, the multi-architecture index digest used by Kubernetes, platform
 manifest digests needed by the local and CI build paths, and AMD64/ARM64 image
@@ -58,7 +93,7 @@ label and signed provenance instead of a second mutable registry tag.
 BuildKit attaches an SBOM and `mode=max` provenance to each GHCR image. GitHub
 Artifact Attestations separately bind each multi-architecture image digest to
 the repository, release workflow, source commit, and GitHub identity. The
-workflow then produces `fx-demo-images-<release>.json`, which contains one
+workflow then produces `brokerage-demo-images-<release>.json`, which contains one
 `tag@sha256` reference per service, attests that file, and attaches it to the
 GitHub Release.
 
@@ -85,12 +120,12 @@ Spring Boot layered-jar extraction, and `Containerfile` as the release
 workflow. It is an option for source review or local modification, not a more
 trusted form of the published release.
 
-For kind, `scripts/build-images` creates local images and
-`FX_DEMO_IMAGE_SOURCE=self-built scripts/kind-deploy` loads them into the
+For kind, `TARGET=kind scripts/build-images` creates local images and
+`BROKERAGE_DEMO_IMAGE_SOURCE=self-built scripts/kind-deploy` loads them into the
 cluster. For EKS, `TARGET=eks PUSH=true scripts/build-images` builds and pushes
 all ten services to the selected `REPOSITORY_PREFIX`. The registry-returned
 digests are written to the ignored `deploy/values/values-self-built.json` file,
-and `FX_DEMO_IMAGE_SOURCE=self-built scripts/deploy eks` deploys those exact
+and `BROKERAGE_DEMO_IMAGE_SOURCE=self-built scripts/deploy eks` deploys those exact
 references.
 
 The build script runs Maven and layered-jar extraction on the Podman machine's

@@ -10,12 +10,12 @@ target="${1:-}"
 action="${2:-}"
 
 case "${target}" in
-  kind) expected_context="kind-fx-demo" ;;
+  kind) expected_context="kind-brokerage-demo" ;;
   eks)
-    require_nonempty FX_DEMO_EKS_CONTEXT
-    expected_context="${FX_DEMO_EKS_CONTEXT}"
+    require_nonempty BROKERAGE_DEMO_EKS_CONTEXT
+    expected_context="${BROKERAGE_DEMO_EKS_CONTEXT}"
     ;;
-  *) echo "Usage: scripts/demo-control <kind|eks> <baseline|stop|surge|delay|failure|redrive>" >&2; exit 1 ;;
+  *) echo "Usage: scripts/demo-control <kind|eks> <baseline|stop|opening-rush|sell-off|buying-power-delay|push-outage|redrive>" >&2; exit 1 ;;
 esac
 require_exact_context "${expected_context}"
 
@@ -37,13 +37,16 @@ call_control() {
 
 case "${action}" in
   baseline)
-    call_control order-generator 18081 /internal/demo/baseline
-    call_control execution-adapter 18082 /internal/demo/recover
+    call_control order-flow-simulator 18081 /internal/demo/baseline
+    call_control exchange-gateway-simulator 18082 /internal/demo/reset
+    call_control buying-power-service 18083 /internal/demo/recover
+    call_control push-gateway-simulator 18084 /internal/demo/recover
     ;;
-  stop) call_control order-generator 18081 /internal/demo/stop ;;
-  surge) call_control order-generator 18081 /internal/demo/surge ;;
-  delay) call_control execution-adapter 18082 /internal/demo/delay ;;
-  failure) call_control order-generator 18081 /internal/demo/processing-failure ;;
-  redrive) call_control dead-letter-service 18083 /internal/demo/redrive ;;
+  stop) call_control order-flow-simulator 18081 /internal/demo/stop ;;
+  opening-rush) call_control order-flow-simulator 18081 /internal/demo/opening-rush ;;
+  sell-off) call_control order-flow-simulator 18081 /internal/demo/sell-off ;;
+  buying-power-delay) call_control buying-power-service 18083 /internal/demo/delay ;;
+  push-outage) call_control push-gateway-simulator 18084 /internal/demo/outage ;;
+  redrive) call_control exception-management-service 18085 /internal/demo/redrive ;;
   *) echo "Unknown action: ${action}" >&2; exit 1 ;;
 esac

@@ -1,38 +1,52 @@
 locals {
-  workflow_tags = ["env:${var.environment}", "service:fx-demo", "purpose:learning-demo"]
+  workflow_tags = ["env:${var.environment}", "service:brokerage-demo", "purpose:learning-demo"]
+
+  simulator_base_url    = "http://order-flow-simulator.brokerage-demo.svc.cluster.local:8080"
+  exchange_base_url     = "http://exchange-gateway-simulator.brokerage-demo.svc.cluster.local:8080"
+  buying_power_base_url = "http://buying-power-service.brokerage-demo.svc.cluster.local:8080"
+  push_gateway_base_url = "http://push-gateway-simulator.brokerage-demo.svc.cluster.local:8080"
+  exception_base_url    = "http://exception-management-service.brokerage-demo.svc.cluster.local:8080"
 
   single_step_workflows = {
     stop_generation = {
-      name             = "FX Demo - Stop Order Generation"
-      description      = "Stop new order generation while allowing orders already accepted into the pipeline to finish processing."
-      handle           = "fx-demo-stop-order-generation"
-      connection_id    = var.generator_connection_id
-      connection_label = "GENERATOR_PRIVATE_HTTP"
-      url              = "http://order-generator.fx-demo.svc.cluster.local:8080/internal/demo/stop"
+      name             = "証券デモ - 注文フロー停止"
+      description      = "新規の模擬注文を停止します。受付済みの注文は引き続き約定、買付余力への反映、通知まで処理されます。"
+      handle           = "brokerage-demo-stop-order-flow"
+      connection_id    = var.simulator_connection_id
+      connection_label = "SIMULATOR_PRIVATE_HTTP"
+      url              = "${local.simulator_base_url}/internal/demo/stop"
     }
-    generate_surge = {
-      name             = "FX Demo - Generate Order Surge"
-      description      = "Increase order generation from 2 to 20 orders/s for 90 seconds, then return to baseline automatically."
-      handle           = "fx-demo-generate-order-surge"
-      connection_id    = var.generator_connection_id
-      connection_label = "GENERATOR_PRIVATE_HTTP"
-      url              = "http://order-generator.fx-demo.svc.cluster.local:8080/internal/demo/surge"
+    opening_rush = {
+      name             = "証券デモ - 寄付き集中"
+      description      = "寄付き前の注文を毎秒 25 件で 60 秒間ため、板寄せで一斉に約定させた後、ベースラインに戻します。"
+      handle           = "brokerage-demo-opening-rush"
+      connection_id    = var.simulator_connection_id
+      connection_label = "SIMULATOR_PRIVATE_HTTP"
+      url              = "${local.simulator_base_url}/internal/demo/opening-rush"
     }
-    inject_delay = {
-      name             = "FX Demo - Inject Execution Delay"
-      description      = "Slow the execution adapter so Kafka lag, pending notional, and end-to-end duration rise."
-      handle           = "fx-demo-inject-execution-delay"
-      connection_id    = var.execution_connection_id
-      connection_label = "EXECUTION_PRIVATE_HTTP"
-      url              = "http://execution-adapter.fx-demo.svc.cluster.local:8080/internal/demo/delay"
+    sell_off = {
+      name             = "証券デモ - 材料による売り殺到 · D105"
+      description      = "架空銘柄 D105 に 120 秒間売り注文を殺到させ、株価をストップ安まで下落させて未約定の売り注文を積み上げた後、ベースラインに戻します。"
+      handle           = "brokerage-demo-sell-off"
+      connection_id    = var.simulator_connection_id
+      connection_label = "SIMULATOR_PRIVATE_HTTP"
+      url              = "${local.simulator_base_url}/internal/demo/sell-off"
     }
-    inject_failure = {
-      name             = "FX Demo - Inject Processing Failure"
-      description      = "Mark exactly the next ten orders with a unique scenario ID so they traverse retry topics into the DLT."
-      handle           = "fx-demo-inject-processing-failure"
-      connection_id    = var.generator_connection_id
-      connection_label = "GENERATOR_PRIVATE_HTTP"
-      url              = "http://order-generator.fx-demo.svc.cluster.local:8080/internal/demo/processing-failure"
+    buying_power_delay = {
+      name             = "証券デモ - 買付余力の反映遅延"
+      description      = "buying-power-service の約定処理を遅らせます。売却代金の反映が遅れ、乗り換え取引が買付余力不足で拒否されます。"
+      handle           = "brokerage-demo-buying-power-delay"
+      connection_id    = var.buying_power_connection_id
+      connection_label = "BUYING_POWER_PRIVATE_HTTP"
+      url              = "${local.buying_power_base_url}/internal/demo/delay"
+    }
+    push_outage = {
+      name             = "証券デモ - プッシュ通知事業者の障害"
+      description      = "プッシュゲートウェイが 503 を返すようにし、お客様向け通知を再試行トピック経由で DLT に送ります。"
+      handle           = "brokerage-demo-push-outage"
+      connection_id    = var.push_gateway_connection_id
+      connection_label = "PUSH_GATEWAY_PRIVATE_HTTP"
+      url              = "${local.push_gateway_base_url}/internal/demo/outage"
     }
   }
 }
@@ -80,51 +94,75 @@ resource "datadog_workflow_automation" "single_step" {
 resource "datadog_workflow_automation" "reset_baseline" {
   count = var.enable_workflows ? 1 : 0
 
-  name        = "FX Demo - Reset to Baseline"
-  description = "Restore normal order intake and execution time so queued orders can complete."
+  name        = "証券デモ - ベースラインに戻す"
+  description = "通常の注文フロー、基準価格でのザラバ（継続売買）、通常の買付余力反映、正常なプッシュ通知事業者の状態に戻します。"
   tags        = local.workflow_tags
   published   = true
 
   spec_json = jsonencode({
-    handle = "fx-demo-reset-to-baseline"
+    handle = "brokerage-demo-reset-to-baseline"
     connectionEnvs = [{
       env = "default"
       connections = [
-        { connectionId = var.generator_connection_id, label = "GENERATOR_PRIVATE_HTTP" },
-        { connectionId = var.execution_connection_id, label = "EXECUTION_PRIVATE_HTTP" },
+        { connectionId = var.simulator_connection_id, label = "SIMULATOR_PRIVATE_HTTP" },
+        { connectionId = var.exchange_connection_id, label = "EXCHANGE_PRIVATE_HTTP" },
+        { connectionId = var.buying_power_connection_id, label = "BUYING_POWER_PRIVATE_HTTP" },
+        { connectionId = var.push_gateway_connection_id, label = "PUSH_GATEWAY_PRIVATE_HTTP" },
       ]
     }]
     triggers = [
       {
-        startStepNames = ["Restore_generation"]
+        startStepNames = ["Restore_order_flow"]
         apiTrigger     = {}
       },
       {
-        startStepNames   = ["Restore_generation"]
+        startStepNames   = ["Restore_order_flow"]
         dashboardTrigger = {}
       },
     ]
     steps = [
       {
-        name            = "Restore_generation"
+        name            = "Restore_order_flow"
         actionId        = "com.datadoghq.http.request"
-        connectionLabel = "GENERATOR_PRIVATE_HTTP"
+        connectionLabel = "SIMULATOR_PRIVATE_HTTP"
         parameters = [
           { name = "verb", value = "POST" },
-          { name = "url", value = "http://order-generator.fx-demo.svc.cluster.local:8080/internal/demo/baseline" },
+          { name = "url", value = "${local.simulator_base_url}/internal/demo/baseline" },
         ]
-        outboundEdges = [{ branchName = "main", nextStepName = "Restore_execution" }]
+        outboundEdges = [{ branchName = "main", nextStepName = "Reset_exchange" }]
         display       = { bounds = { x = 0, y = 0 } }
       },
       {
-        name            = "Restore_execution"
+        name            = "Reset_exchange"
         actionId        = "com.datadoghq.http.request"
-        connectionLabel = "EXECUTION_PRIVATE_HTTP"
+        connectionLabel = "EXCHANGE_PRIVATE_HTTP"
         parameters = [
           { name = "verb", value = "POST" },
-          { name = "url", value = "http://execution-adapter.fx-demo.svc.cluster.local:8080/internal/demo/recover" },
+          { name = "url", value = "${local.exchange_base_url}/internal/demo/reset" },
         ]
-        display = { bounds = { x = 0, y = 180 } }
+        outboundEdges = [{ branchName = "main", nextStepName = "Recover_buying_power" }]
+        display       = { bounds = { x = 0, y = 180 } }
+      },
+      {
+        name            = "Recover_buying_power"
+        actionId        = "com.datadoghq.http.request"
+        connectionLabel = "BUYING_POWER_PRIVATE_HTTP"
+        parameters = [
+          { name = "verb", value = "POST" },
+          { name = "url", value = "${local.buying_power_base_url}/internal/demo/recover" },
+        ]
+        outboundEdges = [{ branchName = "main", nextStepName = "Recover_push_gateway" }]
+        display       = { bounds = { x = 0, y = 360 } }
+      },
+      {
+        name            = "Recover_push_gateway"
+        actionId        = "com.datadoghq.http.request"
+        connectionLabel = "PUSH_GATEWAY_PRIVATE_HTTP"
+        parameters = [
+          { name = "verb", value = "POST" },
+          { name = "url", value = "${local.push_gateway_base_url}/internal/demo/recover" },
+        ]
+        display = { bounds = { x = 0, y = 540 } }
       },
     ]
   })
@@ -133,18 +171,18 @@ resource "datadog_workflow_automation" "reset_baseline" {
 resource "datadog_workflow_automation" "redrive" {
   count = var.enable_workflows ? 1 : 0
 
-  name        = "FX Demo - Redrive Dead Letters"
-  description = "Redrive every currently unresolved DLT record so affected orders can continue toward execution."
+  name        = "証券デモ - 未達通知の再送 (Redrive)"
+  description = "未解決の通知デッドレターをすべて 5 秒の再試行トピックへ再送 (Redrive) し、お客様に約定通知・失効通知を届けます。"
   tags        = local.workflow_tags
   published   = true
 
   spec_json = jsonencode({
-    handle = "fx-demo-redrive-dead-letters"
+    handle = "brokerage-demo-redrive-notifications"
     connectionEnvs = [{
       env = "default"
       connections = [{
-        connectionId = var.dead_letter_connection_id
-        label        = "DEAD_LETTER_PRIVATE_HTTP"
+        connectionId = var.exception_connection_id
+        label        = "EXCEPTION_PRIVATE_HTTP"
       }]
     }]
     triggers = [
@@ -160,10 +198,10 @@ resource "datadog_workflow_automation" "redrive" {
     steps = [{
       name            = "Redrive_all_unresolved"
       actionId        = "com.datadoghq.http.request"
-      connectionLabel = "DEAD_LETTER_PRIVATE_HTTP"
+      connectionLabel = "EXCEPTION_PRIVATE_HTTP"
       parameters = [
         { name = "verb", value = "POST" },
-        { name = "url", value = "http://dead-letter-service.fx-demo.svc.cluster.local:8080/internal/demo/redrive" },
+        { name = "url", value = "${local.exception_base_url}/internal/demo/redrive" },
       ]
       display = { bounds = { x = 0, y = 0 } }
     }]

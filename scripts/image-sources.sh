@@ -2,24 +2,24 @@
 
 # Shared application-image source validation for kind and EKS deployments.
 
-readonly FX_DEMO_RELEASE_REPOSITORY="komoken-dd/datadog-data-streams-monitoring-demo"
-readonly FX_DEMO_RELEASE_WORKFLOW="${FX_DEMO_RELEASE_REPOSITORY}/.github/workflows/release-images.yml"
-readonly FX_DEMO_RELEASE_IMAGE_PREFIX="ghcr.io/${FX_DEMO_RELEASE_REPOSITORY}"
-readonly FX_DEMO_SERVICES=(
-  order-generator order-service pre-trade-control-service execution-adapter position-service
-  risk-service confirmation-service settlement-service order-state-service dead-letter-service
+readonly BROKERAGE_DEMO_RELEASE_REPOSITORY="komoken-dd/datadog-data-streams-monitoring-demo"
+readonly BROKERAGE_DEMO_RELEASE_WORKFLOW="${BROKERAGE_DEMO_RELEASE_REPOSITORY}/.github/workflows/release-images.yml"
+readonly BROKERAGE_DEMO_RELEASE_IMAGE_PREFIX="ghcr.io/${BROKERAGE_DEMO_RELEASE_REPOSITORY}"
+readonly BROKERAGE_DEMO_SERVICES=(
+  order-flow-simulator order-service buying-power-service exchange-gateway-simulator holdings-service
+  trade-report-service notification-service push-gateway-simulator order-state-service exception-management-service
 )
 
 require_image_source() {
   local image_source="$1"
   case "${image_source}" in
     release|self-built) ;;
-    *) die "FX_DEMO_IMAGE_SOURCE must be 'release' or 'self-built'." ;;
+    *) die "BROKERAGE_DEMO_IMAGE_SOURCE must be 'release' or 'self-built'." ;;
   esac
 }
 
 service_names_json() {
-  jq -cn '$ARGS.positional' --args "${FX_DEMO_SERVICES[@]}"
+  jq -cn '$ARGS.positional' --args "${BROKERAGE_DEMO_SERVICES[@]}"
 }
 
 download_and_verify_release_image_values() {
@@ -38,11 +38,11 @@ download_and_verify_release_image_values() {
   require_command gh
   require_command jq
   if [[ ! "${release}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-    die "FX_DEMO_RELEASE must be a semantic release tag such as v1.0.0."
+    die "BROKERAGE_DEMO_RELEASE must be a semantic release tag such as v1.0.0."
   fi
 
-  release_asset="fx-demo-images-${release}.json"
-  release_url="https://github.com/${FX_DEMO_RELEASE_REPOSITORY}/releases/download/${release}/${release_asset}"
+  release_asset="brokerage-demo-images-${release}.json"
+  release_url="https://github.com/${BROKERAGE_DEMO_RELEASE_REPOSITORY}/releases/download/${release}/${release_asset}"
   echo "Application image source: verified GHCR release ${release}"
   echo "Release image lock: ${release_url}"
   curl --fail --location --silent --show-error --output "${output_file}" "${release_url}"
@@ -65,9 +65,9 @@ download_and_verify_release_image_values() {
      and ((.image.references | keys | sort) == ($services | sort))' \
     "${output_file}" >/dev/null || die "The release image lock has an invalid schema or service set."
 
-  for service in "${FX_DEMO_SERVICES[@]}"; do
+  for service in "${BROKERAGE_DEMO_SERVICES[@]}"; do
     reference="$(jq -er --arg service "${service}" '.image.references[$service]' "${output_file}")"
-    expected_prefix="${FX_DEMO_RELEASE_IMAGE_PREFIX}/${service}:${release}@sha256:"
+    expected_prefix="${BROKERAGE_DEMO_RELEASE_IMAGE_PREFIX}/${service}:${release}@sha256:"
     digest="${reference#"${expected_prefix}"}"
     if [[ "${reference}" != "${expected_prefix}"* || ! "${digest}" =~ ^[0-9a-f]{64}$ ]]; then
       die "Unexpected release image reference for ${service}: ${reference}"
@@ -75,8 +75,8 @@ download_and_verify_release_image_values() {
   done
 
   gh attestation verify "${output_file}" \
-    --repo "${FX_DEMO_RELEASE_REPOSITORY}" \
-    --signer-workflow "${FX_DEMO_RELEASE_WORKFLOW}" \
+    --repo "${BROKERAGE_DEMO_RELEASE_REPOSITORY}" \
+    --signer-workflow "${BROKERAGE_DEMO_RELEASE_WORKFLOW}" \
     --source-ref "refs/tags/${release}" \
     --source-digest "${source_revision}" \
     --deny-self-hosted-runners >/dev/null
@@ -106,7 +106,7 @@ validate_self_built_image_values() {
 
   version="$(jq -er '.version' "${values_file}")"
   [[ "${version}" =~ ^[0-9A-Za-z][0-9A-Za-z._-]{0,127}$ ]] || die "Invalid self-built image version: ${version}"
-  for service in "${FX_DEMO_SERVICES[@]}"; do
+  for service in "${BROKERAGE_DEMO_SERVICES[@]}"; do
     reference="$(jq -er --arg service "${service}" '.image.references[$service]' "${values_file}")"
     expected_fragment="/${service}:${version}@sha256:"
     if [[ "${reference}" == *"://"* || "${reference}" == /* || "${reference}" == *[[:space:]]* || "${reference}" != *"${expected_fragment}"* ]]; then

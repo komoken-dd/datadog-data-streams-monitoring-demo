@@ -7,7 +7,7 @@ set -Eeuo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck disable=SC2034
 readonly PROJECT_ROOT
-readonly FX_NAMESPACE="${FX_NAMESPACE:-fx-demo}"
+readonly BROKERAGE_NAMESPACE="${BROKERAGE_NAMESPACE:-brokerage-demo}"
 readonly AWS_REGION="${AWS_REGION:-us-west-2}"
 
 require_command() {
@@ -36,7 +36,7 @@ require_exact_context() {
     exit 1
   fi
   echo "Kubernetes context: ${actual}"
-  echo "Kubernetes namespace: ${FX_NAMESPACE}"
+  echo "Kubernetes namespace: ${BROKERAGE_NAMESPACE}"
 }
 
 require_nonempty() {
@@ -105,7 +105,7 @@ apply_datadog_secret() {
         "api-key": env.DD_API_KEY,
         "app-key": env.DD_APP_KEY
       }
-    }' | kubectl apply --server-side --field-manager=fx-demo-deployer -f -
+    }' | kubectl apply --server-side --field-manager=brokerage-demo-deployer -f -
 }
 
 restart_datadog_agents() {
@@ -121,13 +121,13 @@ restart_datadog_agents() {
 
 wait_for_rollout() {
   local deployment="$1"
-  kubectl --context "$(current_context)" -n "${FX_NAMESPACE}" rollout status "deployment/${deployment}" --timeout=5m
+  kubectl --context "$(current_context)" -n "${BROKERAGE_NAMESPACE}" rollout status "deployment/${deployment}" --timeout=5m
 }
 
 start_port_forward() {
   local service="$1"
   local local_port="$2"
-  kubectl --context "$(current_context)" -n "${FX_NAMESPACE}" port-forward "service/${service}" "${local_port}:8080" >"/tmp/fx-demo-${service}-port-forward.log" 2>&1 &
+  kubectl --context "$(current_context)" -n "${BROKERAGE_NAMESPACE}" port-forward "service/${service}" "${local_port}:8080" >"/tmp/brokerage-demo-${service}-port-forward.log" 2>&1 &
   PORT_FORWARD_PID=$!
   for _ in {1..30}; do
     if curl -fsS "http://127.0.0.1:${local_port}/actuator/health" >/dev/null 2>&1; then

@@ -1,0 +1,41 @@
+spring:
+  application.name: exchange-gateway-simulator
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://postgresql:5432/brokerage}
+    username: ${DATABASE_USERNAME:brokerage}
+    password: ${DATABASE_PASSWORD:brokerage}
+  flyway:
+    table: flyway_schema_history_exchange_gateway
+    baseline-on-migrate: true
+    baseline-version: 0
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:brokerage-kafka-kafka-bootstrap:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.github.komokendd.dsm.brokerage.common.AvroSpecificSerializer
+      acks: all
+      properties.enable.idempotence: true
+    template.observation-enabled: true
+management:
+  endpoints.web.exposure.include: health,info,metrics
+  statsd.metrics.export:
+    enabled: ${DD_METRICS_ENABLED:false}
+    flavor: datadog
+    host: ${DD_AGENT_HOST:localhost}
+    port: ${DD_DOGSTATSD_PORT:8125}
+    polling-frequency: 10s
+logging.structured.format.console: logstash
+server.error.include-message: always
+demo:
+  exchange:
+    seed: ${EXCHANGE_SEED:20261122}
+    match-interval-ms: ${EXCHANGE_MATCH_INTERVAL_MS:250}
+    match-batch-size: ${EXCHANGE_MATCH_BATCH_SIZE:5000}
+    max-working-age-seconds: ${EXCHANGE_MAX_WORKING_AGE_SECONDS:600}
+    full-fill-probability: ${EXCHANGE_FULL_FILL_PROBABILITY:0.6}
+    random-walk-probability: ${EXCHANGE_RANDOM_WALK_PROBABILITY:0.15}
+    sell-pressure-shares-per-tick: ${EXCHANGE_SELL_PRESSURE_SHARES_PER_TICK:4000}
+    completed-retention-minutes: ${EXCHANGE_COMPLETED_RETENTION_MINUTES:60}

@@ -27,7 +27,7 @@ postgresql:
     class: gp3
 datadog:
   namespace: datadog
-  clusterName: fx-demo-eks
+  clusterName: brokerage-demo-eks
   clusterAgentReplicas: 1
   kubeletTlsVerify: true
   # scripts/deploy eks supplies both values from DD_SITE and the selected

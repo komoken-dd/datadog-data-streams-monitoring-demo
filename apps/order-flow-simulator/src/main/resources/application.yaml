@@ -1,0 +1,26 @@
+spring:
+  application.name: order-flow-simulator
+  # Quote polling must not delay the order tick when the exchange is slow.
+  task.scheduling.pool.size: 2
+management:
+  endpoints.web.exposure.include: health,info,metrics
+  statsd.metrics.export:
+    enabled: ${DD_METRICS_ENABLED:false}
+    flavor: datadog
+    host: ${DD_AGENT_HOST:localhost}
+    port: ${DD_DOGSTATSD_PORT:8125}
+    polling-frequency: 10s
+logging.structured.format.console: logstash
+demo:
+  simulator:
+    order-service-url: ${ORDER_SERVICE_URL:http://order-service:8080}
+    exchange-gateway-url: ${EXCHANGE_GATEWAY_URL:http://exchange-gateway-simulator:8080}
+    baseline-per-second: ${BASELINE_PER_SECOND:3}
+    opening-rush-per-second: ${OPENING_RUSH_PER_SECOND:25}
+    opening-rush-seconds: ${OPENING_RUSH_SECONDS:60}
+    sell-off-per-second: ${SELL_OFF_PER_SECOND:25}
+    sell-off-seconds: ${SELL_OFF_SECONDS:120}
+    traffic-seed: ${ORDER_TRAFFIC_SEED:20261122}
+    switch-trade-ratio: ${SWITCH_TRADE_RATIO:0.10}
+    switch-trade-buy-delay-ms: ${SWITCH_TRADE_BUY_DELAY_MS:3000}
+    max-in-flight: ${SIMULATOR_MAX_IN_FLIGHT:200}

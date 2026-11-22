@@ -1,0 +1,126 @@
+{
+  "type": "record",
+  "name": "TradeReportIssuedEvent",
+  "namespace": "io.github.komokendd.dsm.brokerage.schema",
+  "doc": "Trade report issued for one fill.",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string"
+    },
+    {
+      "name": "eventType",
+      "type": "string",
+      "default": "TRADE_REPORT_ISSUED"
+    },
+    {
+      "name": "eventVersion",
+      "type": "int",
+      "default": 1
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "accountId",
+      "type": "string"
+    },
+    {
+      "name": "orderId",
+      "type": "string"
+    },
+    {
+      "name": "symbol",
+      "type": "string"
+    },
+    {
+      "name": "side",
+      "type": "string",
+      "doc": "BUY or SELL"
+    },
+    {
+      "name": "demoScenarioId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "executionId",
+      "type": "string"
+    },
+    {
+      "name": "tradeReportId",
+      "type": "string"
+    },
+    {
+      "name": "tradeDate",
+      "type": "string",
+      "doc": "ISO-8601 JST trade date"
+    },
+    {
+      "name": "settlementDate",
+      "type": "string",
+      "doc": "ISO-8601 settlement date, T+N JPX business days"
+    },
+    {
+      "name": "executedQuantity",
+      "type": "long"
+    },
+    {
+      "name": "executionPrice",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 12,
+        "scale": 1
+      }
+    },
+    {
+      "name": "executionAmountJpy",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 0
+      }
+    },
+    {
+      "name": "commissionJpy",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 0
+      }
+    },
+    {
+      "name": "settlementAmountJpy",
+      "type": {
+        "type": "bytes",
+        "logicalType": "decimal",
+        "precision": 18,
+        "scale": 0
+      }
+    },
+    {
+      "name": "executedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "issuedAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}
