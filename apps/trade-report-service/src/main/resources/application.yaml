@@ -28,3 +28,9 @@ management:
     port: ${DD_DOGSTATSD_PORT:8125}
     polling-frequency: 10s
 logging.structured.format.console: logstash
+demo:
+  market:
+    settlement-cycle-days: ${SETTLEMENT_CYCLE_DAYS:2}
+    commission-jpy: ${COMMISSION_JPY:0}
+    # demo.market.holidays: ISO dates, e.g. env DEMO_MARKET_HOLIDAYS=2026-11-23,2027-01-11.
+    # Unset or empty = built-in JPX calendar (JpxBusinessCalendar.defaultCalendar()).
