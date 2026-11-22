@@ -15,7 +15,7 @@ simulator:
   openingRushSeconds: 60
   sellOffPerSecond: 25
   sellOffSeconds: 120
-  trafficSeed: "424242"
+  trafficSeed: "20261122"
 
 buyingPower:
   # Per-execution processing delay injected by the buying-power-delay scenario.
@@ -24,6 +24,8 @@ buyingPower:
 tradeReport:
   # T+N JPX business days. Holidays default to the built-in 2026-2027 calendar.
   settlementCycleDays: 2
+  # Comma-separated ISO dates that replace the built-in JPX holiday list. Empty uses the default.
+  holidays: ""
 
 storageClass:
   create: false

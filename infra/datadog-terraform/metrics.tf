@@ -17,7 +17,7 @@ resource "datadog_metric_tag_configuration" "notification_delivery_delay" {
   metric_name         = "demo.brokerage.notifications.delivery_delay"
   metric_type         = "distribution"
   include_percentiles = true
-  tags                = ["env", "notification_type", "service", "version"]
+  tags                = ["env", "notification_type", "redriven", "service", "version"]
 }
 
 resource "datadog_metric_metadata" "notification_delivery_delay" {
@@ -41,13 +41,6 @@ resource "datadog_metric_metadata" "order_to_first_execution_duration" {
   short_name  = "Order to first execution"
   description = "Elapsed time from order acceptance to the first fill. Orders held for the opening auction (板寄せ) show the pre-open wait here."
   unit        = "millisecond"
-}
-
-resource "datadog_metric_tag_configuration" "execution_amount" {
-  metric_name         = "demo.brokerage.executions.amount_jpy"
-  metric_type         = "distribution"
-  include_percentiles = false
-  tags                = ["env", "service", "side", "symbol", "version"]
 }
 
 resource "datadog_metric_metadata" "execution_amount" {

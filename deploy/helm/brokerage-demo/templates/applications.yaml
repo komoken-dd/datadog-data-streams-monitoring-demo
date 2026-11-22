@@ -108,6 +108,10 @@ spec:
             {{- if eq .name "trade-report-service" }}
             - name: SETTLEMENT_CYCLE_DAYS
               value: {{ $.Values.tradeReport.settlementCycleDays | quote }}
+            {{- if $.Values.tradeReport.holidays }}
+            - name: DEMO_MARKET_HOLIDAYS
+              value: {{ $.Values.tradeReport.holidays | quote }}
+            {{- end }}
             {{- end }}
             {{- if eq .name "notification-service" }}
             - name: PUSH_GATEWAY_URL

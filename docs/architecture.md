@@ -358,7 +358,8 @@ What follows the real Japanese market:
   (default `0`).
 - Settlement is T+2 JPX business days. The cycle is `SETTLEMENT_CYCLE_DAYS`
   (default `2`, Helm value `tradeReport.settlementCycleDays`). The holiday list
-  is `DEMO_MARKET_HOLIDAYS` (comma-separated ISO dates); when unset, a built-in
+  is `DEMO_MARKET_HOLIDAYS` (comma-separated ISO dates, Helm value
+  `tradeReport.holidays`); when unset, a built-in
   calendar covers weekends, the Dec 31 to Jan 3 market holidays, and Japanese
   national holidays for 2026 and 2027.
 - The opening auction (板寄せ) matches all pre-open orders at one price, and

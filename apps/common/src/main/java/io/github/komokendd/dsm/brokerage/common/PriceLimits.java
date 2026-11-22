@@ -4,7 +4,7 @@ import java.math.BigDecimal;
 
 /**
  * Daily price limits (制限値幅) following the TSE table of limit widths by base price.
- * Only the bands needed for demo price levels are listed.
+ * Bands above 500,000 yen are omitted because demo prices never reach them.
  */
 public final class PriceLimits {
     // {base price strictly below, limit width}

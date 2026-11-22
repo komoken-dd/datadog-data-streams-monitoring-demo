@@ -26,7 +26,7 @@ resource "datadog_monitor" "unresolved_notification_dead_letters" {
 resource "datadog_monitor" "buying_power_reflection_lag" {
   name    = "[Brokerage Demo] Buying-power reflection lag"
   type    = "query alert"
-  query   = "max(last_5m):max:data_streams.kafka.lag_messages{env:${var.environment},topic:brokerage.executions.v1,consumer_group:buying-power-service-v1} > 200"
+  query   = "max(last_5m):max:data_streams.kafka.lag_messages{env:${var.environment},topic:brokerage.executions.v1,consumer_group:buying-power-service-v1} > 100"
   message = <<-EOT
     `buying-power-service` is falling behind on `brokerage.executions.v1`. Executions are confirmed at the exchange, but sale proceeds and released reservations are not yet reflected in buying power (買付余力). Customers who sell and immediately buy with the proceeds are rejected with INSUFFICIENT_BUYING_POWER — 「売ったのに買えない」.
 
@@ -37,7 +37,7 @@ resource "datadog_monitor" "buying_power_reflection_lag" {
   EOT
 
   monitor_thresholds {
-    critical = 200
+    critical = 100
   }
 
   include_tags        = true

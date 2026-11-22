@@ -384,11 +384,11 @@ scripts/datadog-terraform apply
 scripts/datadog-terraform output
 ```
 
-With workflows disabled, the plan creates 17 resources: the dashboard, three
-monitors, four distribution tag configurations, eight metric metadata entries,
+With workflows disabled, the plan creates 16 resources: the dashboard, three
+monitors, three distribution tag configurations, eight metric metadata entries,
 and the APM retention filter. `output` prints the dashboard URL.
 
-The four `datadog_metric_tag_configuration` resources apply to their
+The three `datadog_metric_tag_configuration` resources apply to their
 demo-specific metric names across the Datadog organization, not only to this
 dashboard. Three of them enable the p50/p95/p99 percentiles used by the
 dashboard and the reflection-delay monitor; those widgets stay empty until
