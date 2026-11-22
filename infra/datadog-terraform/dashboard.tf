@@ -1,9 +1,26 @@
 locals {
+  # Services that log against an order_id. Used by the lifecycle list so one
+  # order can be followed from customer intake to notification.
+  lifecycle_services = join(" OR ", [
+    "order-flow-simulator",
+    "order-service",
+    "buying-power-service",
+    "exchange-gateway-simulator",
+    "holdings-service",
+    "trade-report-service",
+    "notification-service",
+    "push-gateway-simulator",
+    "order-state-service",
+    "exception-management-service",
+  ])
+
+  order_filter = "@order_id:$order_id.value @account_id:$account_id.value"
+
   workflow_control_widgets = concat(
     [{
       definition = {
         type             = "note"
-        content          = "## Explore business-flow changes\nRun **Reset to Baseline** to start or resume normal traffic before a scenario. Use **Stop Order Generation** when you want to end new order intake. After an action, return to **Demo Overview** or open **Data Streams Monitoring**. Changes can take tens of seconds to appear."
+        content          = "## Run brokerage scenarios\nRun **Reset to Baseline** before a scenario to start or resume normal order flow (3 orders/s) with a healthy exchange, buying-power service, and push provider. **Opening Rush** and **Sell-Off** return to baseline automatically; **Buying-Power Delay** and **Push Provider Outage** stay active until you reset. After an action, return to **Demo Overview** or open **Data Streams Monitoring**. Changes can take tens of seconds to appear. All symbols, accounts, and amounts are fictional."
         background_color = "blue"
         font_size        = "16"
         text_align       = "left"
@@ -15,47 +32,55 @@ locals {
         type        = "run_workflow"
         workflow_id = workflow.id
         title       = "Reset to Baseline"
-        description = "Business effect: returns order intake and execution to normal so queued orders can complete. Observe: Demo Overview → Business Flow, Pending orders, and Order-to-execution duration; DSM lag should fall."
+        description = "Business effect: baseline order flow resumes, the exchange returns to a continuous session at base prices, buying power is reflected promptly, and push notifications are delivered again. Observe: Demo Overview → Executive Summary; unreflected executions and DSM lag fall back to near zero."
       }
     }],
     [for name, workflow in datadog_workflow_automation.single_step : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Stop Order Generation"
-        description = "Business effect: stops new orders from entering while accepted orders continue to completion. Observe: Demo Overview → Orders received stops rising and Pending orders drains; DSM throughput falls as the pipeline empties."
+        title       = "Stop Order Flow"
+        description = "Business effect: no new customer orders are submitted; accepted orders still execute, update buying power, and notify customers. Observe: Demo Overview → Orders accepted stops rising and Working orders drains; DSM throughput falls as the pipeline empties."
       }
     } if name == "stop_generation"],
     [for name, workflow in datadog_workflow_automation.single_step : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Generate 90-Second Order Surge"
-        description = "Business effect: raises order intake from 2 to 20 orders/s for 90 seconds, then returns automatically. Observe: Demo Overview → Orders received and Executions completed; DSM throughput rises and then settles."
+        title       = "Opening Rush (寄付き集中) 60s"
+        description = "Business effect: pre-open orders accumulate for 60 seconds at 25 orders/s, then the opening auction (板寄せ) fills them in one burst. Observe: Working orders climbs then drops, Order-to-first-execution p95 jumps, and DSM lag on brokerage.executions.v1 spikes across all five consumers."
       }
-    } if name == "generate_surge"],
+    } if name == "opening_rush"],
     [for name, workflow in datadog_workflow_automation.single_step : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Inject Execution Delay"
-        description = "Business effect: approved orders wait longer for execution, increasing pending orders and completion time. Observe: Demo Overview → Pending orders and Order-to-execution duration; DSM pathway latency and lag rise."
+        title       = "News-Driven Sell-Off on D105 (材料による売り殺到)"
+        description = "Business effect: sell orders for fictional symbol D105 surge for 120 seconds, the price falls to limit-down (ストップ安), and unfilled sell orders pile up and finally expire. Observe: Market price and limit-down flag, Unfilled SELL quantity, and Expired orders."
       }
-    } if name == "inject_delay"],
+    } if name == "sell_off"],
     [for name, workflow in datadog_workflow_automation.single_step : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Fail Next 10 Orders"
-        description = "Business effect: the next 10 approved orders fail after retries and remain unresolved. Observe: Demo Overview → Business exceptions, Unresolved dead letters, and affected-order lists; DSM shows retry and DLT traffic."
+        title       = "Delay Buying-Power Reflection"
+        description = "Business effect: sale proceeds reach buying power (買付余力) late, so customers who sell and immediately buy are rejected — 「売ったのに買えない」. Observe: Unreflected executions, Reflection delay p95, and INSUFFICIENT_BUYING_POWER rejects; DSM lag for buying-power-service-v1 grows."
       }
-    } if name == "inject_failure"],
+    } if name == "buying_power_delay"],
+    [for name, workflow in datadog_workflow_automation.single_step : {
+      definition = {
+        type        = "run_workflow"
+        workflow_id = workflow.id
+        title       = "Push Provider Outage"
+        description = "Business effect: trades are booked but customers stop receiving execution and expiry notifications; notifications retry after 5s and 30s, then land in the DLT. Observe: Push gateway results, Notification delivery delay, and Unresolved notification dead letters; DSM shows retry and DLT traffic."
+      }
+    } if name == "push_outage"],
     [for workflow in datadog_workflow_automation.redrive : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Redrive All Dead Letters"
-        description = "Business effect: all unresolved orders are resubmitted and continue toward execution. Observe: Demo Overview → Unresolved dead letters returns to zero, Executions completed rises, and lifecycle lists show completion."
+        title       = "Redrive Undelivered Notifications"
+        description = "Business effect: every unresolved notification is sent again; notification IDs make the push idempotent, so no customer is notified twice. Run after Reset to Baseline has recovered the push provider. Observe: Unresolved notification dead letters returns to zero and Notifications delivered rises."
       }
     }],
   )
@@ -63,7 +88,7 @@ locals {
   cli_control_widgets = [{
     definition = {
       type             = "note"
-      content          = "## Operator Controls use the CLI in this deployment\nWorkflow Automation is disabled. From the repository, run `scripts/demo-control <kind|eks> <action>` with one of: `baseline`, `stop`, `surge`, `delay`, `failure`, or `redrive`. The script verifies the Kubernetes context and reaches ClusterIP-only endpoints through a temporary port-forward. Return to **Demo Overview** or **Data Streams Monitoring** after each action; changes can take tens of seconds to appear. To add buttons here, follow `docs/private-action-runner.md` and set `enable_workflows = true`."
+      content          = "## Operator Controls use the CLI in this deployment\nWorkflow Automation is disabled. From the repository, run `scripts/demo-control <kind|eks> <action>` with one of: `baseline`, `stop`, `opening-rush`, `sell-off`, `buying-power-delay`, `push-outage`, or `redrive`. The script verifies the Kubernetes context and reaches ClusterIP-only endpoints through a temporary port-forward. Return to **Demo Overview** or **Data Streams Monitoring** after each action; changes can take tens of seconds to appear. To add buttons here, follow `docs/private-action-runner.md` and set `enable_workflows = true`."
       background_color = "blue"
       font_size        = "16"
       text_align       = "left"
@@ -81,7 +106,7 @@ locals {
   demo_overview_intro_widget = {
     definition = {
       type             = "note"
-      content          = "## FX order lifecycle observability\nRead top-to-bottom: detect a business anomaly, identify orders affected during the selected time range, and inspect one order without leaving **Demo Overview**. Lists and flow widgets follow the dashboard Time Picker. **Pending** and **Unresolved dead letters** are explicitly labelled current-state gauges; other widgets describe events observed in the selected window. Fees are synthetic. [Open Data Streams Monitoring](${var.datadog_ui_base_url}/data-streams)."
+      content          = "## Online brokerage order flow observability\nRead top-to-bottom: detect customer impact (rejected orders, late buying power (買付余力), undelivered notifications), find the affected orders and accounts, then diagnose the responsible stream or service. Customer orders reserve buying power synchronously; executions fan out over Kafka to buying power, holdings, trade reports, notifications, and order inquiry. Widgets labelled **now** are current-state gauges; the others count events in the selected window. Symbols D101–D105, accounts, prices, and amounts (JPY, 円) are fictional. [Open Data Streams Monitoring](${var.datadog_ui_base_url}/data-streams)."
       background_color = "blue"
       font_size        = "16"
       text_align       = "left"
@@ -93,9 +118,9 @@ locals {
     {
       definition = {
         type  = "query_value"
-        title = "Orders received · selected window"
+        title = "Orders accepted · selected window"
         requests = [{
-          q          = "sum:demo.fx.orders.received{env:$env.value}.as_count()"
+          q          = "sum:demo.brokerage.orders.accepted{env:$env.value}.as_count()"
           aggregator = "sum"
         }]
         autoscale = true
@@ -105,10 +130,39 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Executions completed · selected window"
-        description = "Completed executions accumulated over the dashboard time window."
+        title       = "Orders rejected · selected window"
+        description = "Orders rejected synchronously at intake, for example for insufficient buying power or sellable quantity. Rejected orders never reach the exchange."
         requests = [{
-          q          = "sum:demo.fx.executions.completed{env:$env.value}.as_count()"
+          q          = "sum:demo.brokerage.orders.rejected{env:$env.value}.as_count()"
+          aggregator = "sum"
+          conditional_formats = [
+            { comparator = "=", value = 0, palette = "white_on_green" },
+            { comparator = ">", value = 0, palette = "white_on_yellow" },
+          ]
+        }]
+        autoscale = true
+        precision = 0
+      }
+    },
+    {
+      definition = {
+        type  = "toplist"
+        title = "Rejects by reason · selected window"
+        requests = [{
+          q = "top(sum:demo.brokerage.orders.rejected{env:$env.value} by {reason}.as_count(), 5, 'sum', 'desc')"
+          conditional_formats = [
+            { comparator = ">", value = 0, palette = "white_on_red" },
+          ]
+        }]
+      }
+    },
+    {
+      definition = {
+        type        = "query_value"
+        title       = "Executions (約定) · selected window"
+        description = "Fills reported by the exchange, counting each partial fill separately."
+        requests = [{
+          q          = "sum:demo.brokerage.executions.count{env:$env.value}.as_count()"
           aggregator = "sum"
         }]
         autoscale = true
@@ -118,41 +172,28 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Gross executed notional · selected window"
-        description = "Gross Buy and Sell notional completed during the dashboard time window, converted with fixed synthetic USD rates and not netted. Displayed in billions of USD."
+        title       = "Executed amount (約定代金) · 百万円"
+        description = "Gross BUY and SELL executed amount during the selected window, not netted, in millions of fictional yen (百万円). Commission is zero."
         requests = [{
-          q          = "sum:demo.fx.executions.notional_usd{env:$env.value} / 1000000000"
+          q          = "sum:demo.brokerage.executions.amount_jpy{env:$env.value} / 1000000"
           aggregator = "sum"
         }]
         autoscale   = false
-        custom_unit = "B USD"
+        custom_unit = "百万円"
         precision   = 1
       }
     },
     {
       definition = {
         type        = "query_value"
-        title       = "Realized fees · selected window"
-        description = "Fictional fees attached to completed executions during the dashboard time window; not actual revenue or spread."
+        title       = "Working orders · now"
+        description = "Accepted orders that are not yet fully filled or expired."
         requests = [{
-          q          = "sum:demo.fx.executions.synthetic_fee_usd{env:$env.value}"
-          aggregator = "sum"
-        }]
-        autoscale   = true
-        custom_unit = "USD"
-        precision   = 2
-      }
-    },
-    {
-      definition = {
-        type  = "query_value"
-        title = "Pending orders"
-        requests = [{
-          q          = "avg:demo.fx.orders.pending{env:$env.value}"
+          q          = "sum:demo.brokerage.orders.working{env:$env.value}"
           aggregator = "last"
           conditional_formats = [
-            { comparator = "<=", value = 10, palette = "white_on_green" },
-            { comparator = ">", value = 25, palette = "white_on_red" },
+            { comparator = "<=", value = 50, palette = "white_on_green" },
+            { comparator = ">", value = 200, palette = "white_on_red" },
           ]
         }]
         autoscale = true
@@ -162,42 +203,63 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Pending USD-equivalent notional"
-        description = "Current USD-equivalent notional for non-terminal orders, including retry and dead-letter states."
+        title       = "Unfilled SELL quantity · now"
+        description = "Shares still open on working SELL orders. Rises sharply when a sell-off pushes a symbol to limit-down (ストップ安) and buyers disappear."
         requests = [{
-          q          = "avg:demo.fx.orders.pending_notional_usd{env:$env.value}"
+          q          = "sum:demo.brokerage.orders.unfilled_quantity{env:$env.value,side:SELL}"
           aggregator = "last"
         }]
         autoscale   = true
-        custom_unit = "USD"
+        custom_unit = "株"
         precision   = 0
       }
     },
     {
       definition = {
         type        = "query_value"
-        title       = "Expected fees on pending orders"
-        description = "Current fictional fee opportunity if all non-terminal orders eventually execute; not realized revenue."
+        title       = "Current scenario · now"
+        description = "Scenario currently driven by order-flow-simulator: 0 = stopped, 1 = baseline, 2 = opening rush (寄付き集中), 3 = news-driven sell-off (材料による売り殺到)."
         requests = [{
-          q          = "sum:demo.fx.orders.pending_expected_fee_usd{env:$env.value}"
+          q          = "max:demo.brokerage.scenario.current{env:$env.value}"
           aggregator = "last"
+          conditional_formats = [
+            { comparator = "=", value = 0, palette = "white_on_gray" },
+            { comparator = "=", value = 1, palette = "white_on_green" },
+            { comparator = ">=", value = 2, palette = "white_on_yellow" },
+          ]
         }]
-        autoscale   = true
-        custom_unit = "USD"
-        precision   = 2
+        autoscale = false
+        precision = 0
       }
     },
     {
       definition = {
         type        = "query_value"
-        title       = "Order-to-execution · p95"
-        description = "95th-percentile elapsed time from order submission to execution. Datadog automatically selects milliseconds, seconds, or minutes from the registered time unit."
+        title       = "Unreflected buying-power executions · now"
+        description = "Executions confirmed by the exchange whose effect is not yet reflected in buying power (買付余力)."
         requests = [{
-          q          = "p95:demo.fx.order_to_execution.duration{env:$env.value}"
+          q          = "sum:demo.brokerage.buying_power.unreflected_executions{env:$env.value}"
           aggregator = "last"
           conditional_formats = [
-            { comparator = "<=", value = 500, palette = "white_on_green" },
-            { comparator = ">", value = 2000, palette = "white_on_red" },
+            { comparator = "<=", value = 20, palette = "white_on_green" },
+            { comparator = ">", value = 100, palette = "white_on_red" },
+          ]
+        }]
+        autoscale = true
+        precision = 0
+      }
+    },
+    {
+      definition = {
+        type        = "query_value"
+        title       = "Oldest unreflected execution · now"
+        description = "Age of the oldest execution not yet reflected in buying power. While it grows, sale proceeds cannot fund new BUY orders."
+        requests = [{
+          q          = "max:demo.brokerage.buying_power.oldest_unreflected_age{env:$env.value}"
+          aggregator = "last"
+          conditional_formats = [
+            { comparator = "<=", value = 2, palette = "white_on_green" },
+            { comparator = ">", value = 10, palette = "white_on_red" },
           ]
         }]
         autoscale = true
@@ -207,14 +269,14 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Oldest active processing order"
-        description = "Current age of the oldest order that can still progress through normal processing. Unresolved dead letters are excluded and shown separately."
+        title       = "Buying-power reflection delay · p95"
+        description = "95th-percentile time from execution to buying-power reflection in the selected window."
         requests = [{
-          q          = "avg:demo.fx.orders.oldest_pending_age{env:$env.value}"
+          q          = "p95:demo.brokerage.buying_power.reflection_delay{env:$env.value}"
           aggregator = "last"
           conditional_formats = [
-            { comparator = "<=", value = 5, palette = "white_on_green" },
-            { comparator = ">", value = 30, palette = "white_on_red" },
+            { comparator = "<=", value = 1000, palette = "white_on_green" },
+            { comparator = ">", value = 5000, palette = "white_on_red" },
           ]
         }]
         autoscale = true
@@ -223,10 +285,28 @@ locals {
     },
     {
       definition = {
-        type  = "query_value"
-        title = "Unresolved dead letters"
+        type        = "query_value"
+        title       = "Notification delivery delay · p95"
+        description = "95th-percentile time from execution or expiry to push delivery, including retries."
         requests = [{
-          q          = "avg:demo.fx.dead_letter.unresolved{env:$env.value}"
+          q          = "p95:demo.brokerage.notifications.delivery_delay{env:$env.value}"
+          aggregator = "last"
+          conditional_formats = [
+            { comparator = "<=", value = 2000, palette = "white_on_green" },
+            { comparator = ">", value = 10000, palette = "white_on_red" },
+          ]
+        }]
+        autoscale = true
+        precision = 1
+      }
+    },
+    {
+      definition = {
+        type        = "query_value"
+        title       = "Unresolved notification dead letters · now"
+        description = "Customer notifications that exhausted retries and wait in exception-management-service for redrive."
+        requests = [{
+          q          = "sum:demo.brokerage.notifications.dead_letter.unresolved{env:$env.value}"
           aggregator = "last"
           conditional_formats = [
             { comparator = "=", value = 0, palette = "white_on_green" },
@@ -240,10 +320,10 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Oldest unresolved dead letter"
-        description = "Current residence time of the oldest unresolved record since it reached the dead-letter topic."
+        title       = "Oldest unresolved notification dead letter · now"
+        description = "Residence time of the oldest undelivered notification since it reached the DLT."
         requests = [{
-          q          = "avg:demo.fx.dead_letter.oldest_unresolved_age{env:$env.value}"
+          q          = "max:demo.brokerage.notifications.dead_letter.oldest_unresolved_age{env:$env.value}"
           aggregator = "last"
           conditional_formats = [
             { comparator = "=", value = 0, palette = "white_on_green" },
@@ -260,21 +340,21 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Business flow · received, executed, rejected, DLT"
+        title       = "Order flow · accepted, executions, expired, rejected"
         show_legend = true
         requests = [
-          { q = "sum:demo.fx.orders.received{env:$env.value}.as_count()", display_type = "bars", style = { palette = "cool", line_type = "solid", line_width = "normal" } },
-          { q = "sum:demo.fx.executions.completed{env:$env.value}.as_count()", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "thick" } },
-          { q = "sum:demo.fx.orders.rejected{env:$env.value}.as_count()", display_type = "line", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
-          { q = "sum:demo.fx.dead_letter.events{env:$env.value}.as_count()", display_type = "line", style = { palette = "warm", line_type = "solid", line_width = "thick" } },
+          { q = "sum:demo.brokerage.orders.accepted{env:$env.value}.as_count()", display_type = "bars", style = { palette = "cool", line_type = "solid", line_width = "normal" } },
+          { q = "sum:demo.brokerage.executions.count{env:$env.value}.as_count()", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "thick" } },
+          { q = "sum:demo.brokerage.orders.expired{env:$env.value}.as_count()", display_type = "line", style = { palette = "purple", line_type = "solid", line_width = "normal" } },
+          { q = "sum:demo.brokerage.orders.rejected{env:$env.value}.as_count()", display_type = "line", style = { palette = "warm", line_type = "solid", line_width = "thick" } },
         ]
       }
     },
     {
       definition = {
         type        = "sunburst"
-        title       = "Order intake mix · Buy/Sell and currency pair"
-        description = "Inner ring: Buy/Sell. Outer ring: currency pair within each side. Values are order counts for the selected time window."
+        title       = "Accepted orders · side and symbol"
+        description = "Inner ring: BUY/SELL. Outer ring: fictional symbol within each side. Values are accepted order counts for the selected time window."
         hide_total  = false
         legend = {
           type         = "automatic"
@@ -285,7 +365,7 @@ locals {
           queries = [{
             data_source = "metrics"
             name        = "query1"
-            query       = "sum:demo.fx.orders.received{env:$env.value} by {side,currency_pair}.as_count()"
+            query       = "sum:demo.brokerage.orders.accepted{env:$env.value} by {side,symbol}.as_count()"
             aggregator  = "sum"
           }]
           formulas        = [{ formula = "query1" }]
@@ -297,10 +377,23 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Executed USD-equivalent notional · currency pair and side"
+        title       = "Executions · partial versus final fill"
+        description = "An order can fill in several parts (分割約定). The final fill completes the order."
         show_legend = true
         requests = [{
-          q            = "sum:demo.fx.executions.notional_usd{env:$env.value} by {currency_pair,side}"
+          q            = "sum:demo.brokerage.executions.count{env:$env.value} by {fill_type}.as_count()"
+          display_type = "bars"
+          style        = { palette = "green", line_type = "solid", line_width = "normal" }
+        }]
+      }
+    },
+    {
+      definition = {
+        type        = "timeseries"
+        title       = "Executed amount (約定代金) · symbol and side"
+        show_legend = true
+        requests = [{
+          q            = "sum:demo.brokerage.executions.amount_jpy{env:$env.value} by {symbol,side}"
           display_type = "bars"
           style        = { palette = "dog_classic", line_type = "solid", line_width = "normal" }
         }]
@@ -309,59 +402,126 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Pending backlog snapshot · count and USD-equivalent notional by currency pair"
+        title       = "Market price · symbol (change % on right axis)"
         show_legend = true
         requests = [
-          { q = "sum:demo.fx.orders.pending_by_pair{env:$env.value} by {currency_pair}", display_type = "line", style = { palette = "cool", line_type = "solid", line_width = "thick" } },
-          { q = "sum:demo.fx.orders.pending_notional_by_pair_usd{env:$env.value} by {currency_pair}", display_type = "line", style = { palette = "purple", line_type = "dashed", line_width = "normal" }, on_right_yaxis = true },
+          { q = "avg:demo.brokerage.market.price{env:$env.value} by {symbol}", display_type = "line", style = { palette = "cool", line_type = "solid", line_width = "thick" } },
+          { q = "avg:demo.brokerage.market.price_change_pct{env:$env.value} by {symbol}", display_type = "line", style = { palette = "orange", line_type = "dashed", line_width = "normal" }, on_right_yaxis = true },
         ]
       }
     },
     {
       definition = {
-        type        = "timeseries"
-        title       = "Fees · realized flow versus current pending opportunity"
-        show_legend = true
-        requests = [
-          { q = "sum:demo.fx.executions.synthetic_fee_usd{env:$env.value} by {currency_pair,side}", display_type = "bars", style = { palette = "green", line_type = "solid", line_width = "normal" } },
-          { q = "sum:demo.fx.orders.pending_expected_fee_usd{env:$env.value} by {currency_pair}", display_type = "line", style = { palette = "orange", line_type = "solid", line_width = "thick" } },
-        ]
-      }
-    },
-    {
-      definition = {
-        type        = "timeseries"
-        title       = "Order-to-execution duration · p50 / p95 / p99"
-        show_legend = true
-        requests = [
-          { q = "p50:demo.fx.order_to_execution.duration{env:$env.value}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "normal" } },
-          { q = "p95:demo.fx.order_to_execution.duration{env:$env.value}", display_type = "line", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
-          { q = "p99:demo.fx.order_to_execution.duration{env:$env.value}", display_type = "line", style = { palette = "warm", line_type = "solid", line_width = "thick" } },
-        ]
-      }
-    },
-    {
-      definition = {
-        type        = "timeseries"
-        title       = "Order-to-execution p95 · currency pair"
-        show_legend = true
+        type        = "query_table"
+        title       = "Market snapshot · price, change %, and limit-down (ストップ安) flag"
+        description = "Latest fictional quote per symbol. A limit-down flag of 1 means the price reached the lower daily limit and sell orders can no longer fill."
         requests = [{
-          q            = "p95:demo.fx.order_to_execution.duration{env:$env.value} by {currency_pair}"
-          display_type = "line"
-          style        = { palette = "orange", line_type = "solid", line_width = "thick" }
+          response_format = "scalar"
+          queries = [
+            { data_source = "metrics", name = "price", query = "avg:demo.brokerage.market.price{env:$env.value} by {symbol}", aggregator = "last" },
+            { data_source = "metrics", name = "change", query = "avg:demo.brokerage.market.price_change_pct{env:$env.value} by {symbol}", aggregator = "last" },
+            { data_source = "metrics", name = "limit_down", query = "max:demo.brokerage.market.limit_down{env:$env.value} by {symbol}", aggregator = "last" },
+          ]
+          formulas = [
+            { formula = "price", alias = "Last price (円)" },
+            {
+              formula = "change"
+              alias   = "Change %"
+              conditional_formats = [
+                { comparator = "<=", value = -10, palette = "white_on_red" },
+                { comparator = "<", value = 0, palette = "white_on_yellow" },
+                { comparator = ">=", value = 0, palette = "white_on_green" },
+              ]
+            },
+            {
+              formula = "limit_down"
+              alias   = "Limit-down"
+              conditional_formats = [
+                { comparator = ">=", value = 1, palette = "white_on_red" },
+                { comparator = "<", value = 1, palette = "white_on_green" },
+              ]
+            },
+          ]
         }]
       }
     },
     {
       definition = {
         type        = "timeseries"
-        title       = "Business exceptions · rejection, retry, and dead letter"
+        title       = "Working orders and unfilled quantity · symbol and side (now)"
+        description = "Lines: working order count. Dashed, right axis: unfilled shares."
         show_legend = true
         requests = [
-          { q = "sum:demo.fx.orders.rejected{env:$env.value} by {failure_category,currency_pair}.as_count()", display_type = "bars", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
-          { q = "sum:demo.fx.retry.attempts{env:$env.value} by {failure_category,currency_pair}.as_count()", display_type = "line", style = { palette = "warm", line_type = "dashed", line_width = "normal" } },
-          { q = "sum:demo.fx.dead_letter.events{env:$env.value} by {failure_category,currency_pair}.as_count()", display_type = "line", style = { palette = "red", line_type = "solid", line_width = "thick" } },
+          { q = "sum:demo.brokerage.orders.working{env:$env.value} by {symbol,side}", display_type = "line", style = { palette = "cool", line_type = "solid", line_width = "thick" } },
+          { q = "sum:demo.brokerage.orders.unfilled_quantity{env:$env.value} by {symbol,side}", display_type = "line", style = { palette = "purple", line_type = "dashed", line_width = "normal" }, on_right_yaxis = true },
         ]
+      }
+    },
+    {
+      definition = {
+        type        = "timeseries"
+        title       = "Order to first execution · p50 / p95 / p99"
+        description = "Orders held for the opening auction (板寄せ) wait for the auction, so p95 and p99 jump during an opening rush."
+        show_legend = true
+        requests = [
+          { q = "p50:demo.brokerage.order_to_first_execution.duration{env:$env.value}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "normal" } },
+          { q = "p95:demo.brokerage.order_to_first_execution.duration{env:$env.value}", display_type = "line", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
+          { q = "p99:demo.brokerage.order_to_first_execution.duration{env:$env.value}", display_type = "line", style = { palette = "warm", line_type = "solid", line_width = "thick" } },
+        ]
+      }
+    },
+    {
+      definition = {
+        type        = "timeseries"
+        title       = "Rejects by reason and switch-trade results"
+        description = "Bars: rejects by reason. Thick red line: INSUFFICIENT_BUYING_POWER, the 「売ったのに買えない」 symptom. Dashed, right axis: switch trades (sell, then buy with the proceeds) by result."
+        show_legend = true
+        requests = [
+          { q = "sum:demo.brokerage.orders.rejected{env:$env.value} by {reason}.as_count()", display_type = "bars", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
+          { q = "sum:demo.brokerage.orders.rejected{env:$env.value,reason:INSUFFICIENT_BUYING_POWER}.as_count()", display_type = "line", style = { palette = "red", line_type = "solid", line_width = "thick" } },
+          { q = "sum:demo.brokerage.simulator.switch_trades{env:$env.value} by {result}.as_count()", display_type = "line", style = { palette = "cool", line_type = "dashed", line_width = "normal" }, on_right_yaxis = true },
+        ]
+      }
+    },
+    {
+      definition = {
+        type        = "timeseries"
+        title       = "Buying-power reflection delay · p50 / p95 / p99 and unreflected executions"
+        description = "Dashed, right axis: executions not yet reflected in buying power (now)."
+        show_legend = true
+        requests = [
+          { q = "p50:demo.brokerage.buying_power.reflection_delay{env:$env.value}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "normal" } },
+          { q = "p95:demo.brokerage.buying_power.reflection_delay{env:$env.value}", display_type = "line", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
+          { q = "p99:demo.brokerage.buying_power.reflection_delay{env:$env.value}", display_type = "line", style = { palette = "warm", line_type = "solid", line_width = "thick" } },
+          { q = "sum:demo.brokerage.buying_power.unreflected_executions{env:$env.value}", display_type = "line", style = { palette = "purple", line_type = "dashed", line_width = "normal" }, on_right_yaxis = true },
+        ]
+      }
+    },
+    {
+      definition = {
+        type        = "timeseries"
+        title       = "Notifications · delivered, retried, and dead-lettered"
+        description = "Dashed, right axis: notification delivery delay p95."
+        show_legend = true
+        requests = [
+          { q = "sum:demo.brokerage.notifications.delivered{env:$env.value} by {notification_type}.as_count()", display_type = "bars", style = { palette = "green", line_type = "solid", line_width = "normal" } },
+          { q = "sum:demo.brokerage.notifications.retry_attempts{env:$env.value} by {notification_type}.as_count()", display_type = "line", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
+          { q = "sum:demo.brokerage.notifications.dead_letter.events{env:$env.value} by {failure_category}.as_count()", display_type = "line", style = { palette = "red", line_type = "solid", line_width = "thick" } },
+          { q = "p95:demo.brokerage.notifications.delivery_delay{env:$env.value}", display_type = "line", style = { palette = "purple", line_type = "dashed", line_width = "normal" }, on_right_yaxis = true },
+        ]
+      }
+    },
+    {
+      definition = {
+        type        = "timeseries"
+        title       = "Push gateway · requests by result"
+        description = "Responses from the fictional external push provider. A provider outage shows up here first."
+        show_legend = true
+        requests = [{
+          q            = "sum:demo.brokerage.push_gateway.requests{env:$env.value} by {result}.as_count()"
+          display_type = "bars"
+          style        = { palette = "dog_classic", line_type = "solid", line_width = "normal" }
+        }]
       }
     },
   ]
@@ -393,7 +553,34 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "APM · service errors and latency"
+        title       = "DSM · execution fan-out lag on brokerage.executions.v1"
+        description = "One line per consumer group. During an opening rush every group lags together; a buying-power delay makes only buying-power-service-v1 fall behind."
+        show_legend = true
+        requests = [{
+          q            = "max:data_streams.kafka.lag_messages{env:$env.value,topic:brokerage.executions.v1} by {consumer_group}"
+          display_type = "line"
+          style        = { palette = "warm", line_type = "solid", line_width = "thick" }
+        }]
+      }
+    },
+    {
+      definition = {
+        type        = "timeseries"
+        title       = "APM · synchronous order intake (order-service → buying-power-service)"
+        description = "Bars: HTTP request errors. Lines, right axis: p95 latency. Buying power is reserved in-line before an order is accepted."
+        show_legend = true
+        requests = [
+          { q = "sum:trace.servlet.request.errors{env:$env.value,service:order-service} by {service}.as_count()", display_type = "bars", style = { palette = "warm", line_type = "solid", line_width = "normal" } },
+          { q = "sum:trace.servlet.request.errors{env:$env.value,service:buying-power-service} by {service}.as_count()", display_type = "bars", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
+          { q = "p95:trace.servlet.request{env:$env.value,service:order-service} by {service}", display_type = "line", style = { palette = "purple", line_type = "solid", line_width = "normal" }, on_right_yaxis = true },
+          { q = "p95:trace.servlet.request{env:$env.value,service:buying-power-service} by {service}", display_type = "line", style = { palette = "cool", line_type = "solid", line_width = "normal" }, on_right_yaxis = true },
+        ]
+      }
+    },
+    {
+      definition = {
+        type        = "timeseries"
+        title       = "APM · Kafka consumer errors and latency"
         show_legend = true
         requests = [
           { q = "sum:trace.kafka.consume.errors{env:$env.value} by {service}.as_count()", display_type = "bars", style = { palette = "warm", line_type = "solid", line_width = "normal" } },
@@ -422,8 +609,8 @@ locals {
         title       = "Kafka brokers on Kubernetes · readiness and restarts"
         show_legend = true
         requests = [
-          { q = "sum:kubernetes_state.container.ready{kube_namespace:fx-demo,kube_app_name:kafka} by {pod_name}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "thick" } },
-          { q = "max:kubernetes.containers.restarts{kube_namespace:fx-demo,kube_app_name:kafka} by {pod_name}", display_type = "bars", style = { palette = "warm", line_type = "solid", line_width = "normal" }, on_right_yaxis = true },
+          { q = "sum:kubernetes_state.container.ready{kube_namespace:brokerage-demo,kube_app_name:kafka} by {pod_name}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "thick" } },
+          { q = "max:kubernetes.containers.restarts{kube_namespace:brokerage-demo,kube_app_name:kafka} by {pod_name}", display_type = "bars", style = { palette = "warm", line_type = "solid", line_width = "normal" }, on_right_yaxis = true },
         ]
       }
     },
@@ -433,8 +620,8 @@ locals {
         title       = "Kafka brokers on Kubernetes · CPU and memory"
         show_legend = true
         requests = [
-          { q = "avg:kubernetes.cpu.usage.total{kube_namespace:fx-demo,kube_app_name:kafka} by {pod_name}", display_type = "line", style = { palette = "cool", line_type = "solid", line_width = "normal" } },
-          { q = "avg:kubernetes.memory.working_set{kube_namespace:fx-demo,kube_app_name:kafka} by {pod_name}", display_type = "line", style = { palette = "purple", line_type = "solid", line_width = "normal" }, on_right_yaxis = true },
+          { q = "avg:kubernetes.cpu.usage.total{kube_namespace:brokerage-demo,kube_app_name:kafka} by {pod_name}", display_type = "line", style = { palette = "cool", line_type = "solid", line_width = "normal" } },
+          { q = "avg:kubernetes.memory.working_set{kube_namespace:brokerage-demo,kube_app_name:kafka} by {pod_name}", display_type = "line", style = { palette = "purple", line_type = "solid", line_width = "normal" }, on_right_yaxis = true },
         ]
       }
     },
@@ -444,8 +631,8 @@ locals {
         title       = "Application deployments · desired versus ready replicas"
         show_legend = true
         requests = [
-          { q = "max:kubernetes_state.deployment.replicas_desired{env:$env.value,kube_namespace:fx-demo} by {kube_deployment}", display_type = "line", style = { palette = "cool", line_type = "dashed", line_width = "normal" } },
-          { q = "max:kubernetes_state.deployment.replicas_ready{env:$env.value,kube_namespace:fx-demo} by {kube_deployment}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "thick" } },
+          { q = "max:kubernetes_state.deployment.replicas_desired{env:$env.value,kube_namespace:brokerage-demo} by {kube_deployment}", display_type = "line", style = { palette = "cool", line_type = "dashed", line_width = "normal" } },
+          { q = "max:kubernetes_state.deployment.replicas_ready{env:$env.value,kube_namespace:brokerage-demo} by {kube_deployment}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "thick" } },
         ]
       }
     },
@@ -455,7 +642,7 @@ locals {
         title       = "Application containers · restarts"
         show_legend = true
         requests = [{
-          q            = "max:kubernetes.containers.restarts{env:$env.value,kube_namespace:fx-demo} by {kube_deployment,pod_name}"
+          q            = "max:kubernetes.containers.restarts{env:$env.value,kube_namespace:brokerage-demo} by {kube_deployment,pod_name}"
           display_type = "bars"
           style        = { palette = "warm", line_type = "solid", line_width = "normal" }
         }]
@@ -467,7 +654,7 @@ locals {
     {
       definition = {
         type             = "note"
-        content          = "### From aggregate impact to one order\nAll lists below follow the dashboard Time Picker and the dashboard **order_id** variable. Leave `order_id` as `*` to find affected orders, then select one concrete ID to focus every investigation list on the same order. **Unresolved dead letters** above is a current-state gauge, so widen the Time Picker when investigating an older unresolved item."
+        content          = "### From aggregate impact to one order\nAll lists below follow the dashboard Time Picker and the **order_id** and **account_id** variables. Leave both as `*` to find affected orders, then select one account to see every order it placed, or one order to follow it from intake through execution, buying power, trade report, and notification. Gauges marked **now** are current state, so widen the Time Picker when investigating an older unresolved dead letter."
         background_color = "gray"
         font_size        = "14"
         text_align       = "left"
@@ -477,94 +664,98 @@ locals {
     {
       definition = {
         type        = "list_stream"
-        title       = "Dead-lettered orders · selected window"
+        title       = "Rejected orders · not accepted in selected window"
         title_size  = "16"
         title_align = "left"
         requests = [{
           response_format = "event_list"
           query = {
             data_source  = "logs_transaction_stream"
-            query_string = "env:$env.value service:dead-letter-service @order_id:$order_id.value @event_type:DEAD_LETTER"
+            query_string = "env:$env.value service:order-service ${local.order_filter} @event_type:ORDER_REJECTED"
             group_by     = [{ facet = "@order_id" }]
             compute = [
-              { aggregation = "latest", facet = "@currency_pair" },
-              { aggregation = "latest", facet = "@notional_usd" },
+              { aggregation = "latest", facet = "@account_id" },
+              { aggregation = "latest", facet = "@symbol" },
+              { aggregation = "latest", facet = "@side" },
+              { aggregation = "latest", facet = "@reason" },
+              { aggregation = "latest", facet = "@demo_scenario_id" },
+            ]
+          }
+          columns = [
+            { field = "group_by", width = "auto" },
+            { field = "@account_id:latest", width = "auto" },
+            { field = "@symbol:latest", width = "auto" },
+            { field = "@side:latest", width = "auto" },
+            { field = "@reason:latest", width = "auto" },
+            { field = "@demo_scenario_id:latest", width = "auto" },
+            { field = "timeline", width = "auto" },
+            { field = "max_severity", width = "auto" },
+          ]
+        }]
+      }
+    },
+    {
+      definition = {
+        type        = "list_stream"
+        title       = "Expired orders · unfilled quantity released in selected window"
+        title_size  = "16"
+        title_align = "left"
+        requests = [{
+          response_format = "event_list"
+          query = {
+            data_source  = "logs_transaction_stream"
+            query_string = "env:$env.value ${local.order_filter} @event_type:ORDER_EXPIRED"
+            group_by     = [{ facet = "@order_id" }]
+            compute = [
+              { aggregation = "latest", facet = "@account_id" },
+              { aggregation = "latest", facet = "@symbol" },
+              { aggregation = "latest", facet = "@reason" },
+              { aggregation = "latest", facet = "@demo_scenario_id" },
+              { aggregation = "count", facet = "count" },
+            ]
+          }
+          columns = [
+            { field = "group_by", width = "auto" },
+            { field = "@account_id:latest", width = "auto" },
+            { field = "@symbol:latest", width = "auto" },
+            { field = "@reason:latest", width = "auto" },
+            { field = "@demo_scenario_id:latest", width = "auto" },
+            { field = "timeline", width = "auto" },
+            { field = "max_severity", width = "auto" },
+            { field = "count:count", width = "auto" },
+          ]
+        }]
+      }
+    },
+    {
+      definition = {
+        type        = "list_stream"
+        title       = "Notification dead letters · customers not yet notified"
+        title_size  = "16"
+        title_align = "left"
+        requests = [{
+          response_format = "event_list"
+          query = {
+            data_source  = "logs_transaction_stream"
+            query_string = "env:$env.value service:exception-management-service ${local.order_filter} @event_type:NOTIFICATION_DEAD_LETTER"
+            group_by     = [{ facet = "@order_id" }]
+            compute = [
+              { aggregation = "latest", facet = "@account_id" },
+              { aggregation = "latest", facet = "@symbol" },
+              { aggregation = "latest", facet = "@notification_type" },
               { aggregation = "latest", facet = "@failure_category" },
               { aggregation = "latest", facet = "@retry_count" },
-              { aggregation = "latest", facet = "@demo_scenario_id" },
             ]
           }
           columns = [
             { field = "group_by", width = "auto" },
-            { field = "@currency_pair:latest", width = "auto" },
-            { field = "@notional_usd:latest", width = "auto" },
+            { field = "@account_id:latest", width = "auto" },
+            { field = "@symbol:latest", width = "auto" },
+            { field = "@notification_type:latest", width = "auto" },
             { field = "@failure_category:latest", width = "auto" },
             { field = "@retry_count:latest", width = "auto" },
-            { field = "@demo_scenario_id:latest", width = "auto" },
             { field = "timeline", width = "auto" },
             { field = "max_severity", width = "auto" },
-          ]
-        }]
-      }
-    },
-    {
-      definition = {
-        type        = "list_stream"
-        title       = "Rejected orders · not executed in selected window"
-        title_size  = "16"
-        title_align = "left"
-        requests = [{
-          response_format = "event_list"
-          query = {
-            data_source  = "logs_transaction_stream"
-            query_string = "env:$env.value @order_id:$order_id.value @event_type:(ORDER_REJECTED OR REJECTED)"
-            group_by     = [{ facet = "@order_id" }]
-            compute = [
-              { aggregation = "latest", facet = "@currency_pair" },
-              { aggregation = "latest", facet = "@event_type" },
-              { aggregation = "count", facet = "count" },
-            ]
-          }
-          columns = [
-            { field = "group_by", width = "auto" },
-            { field = "@currency_pair:latest", width = "auto" },
-            { field = "@event_type:latest", width = "auto" },
-            { field = "timeline", width = "auto" },
-            { field = "duration", width = "auto" },
-            { field = "max_severity", width = "auto" },
-            { field = "count:count", width = "auto" },
-          ]
-        }]
-      }
-    },
-    {
-      definition = {
-        type        = "list_stream"
-        title       = "Retry / DLT activity · processing failures in selected window"
-        title_size  = "16"
-        title_align = "left"
-        requests = [{
-          response_format = "event_list"
-          query = {
-            data_source  = "logs_transaction_stream"
-            query_string = "env:$env.value @order_id:$order_id.value @event_type:(RETRYING OR DEAD_LETTER)"
-            group_by     = [{ facet = "@order_id" }]
-            compute = [
-              { aggregation = "latest", facet = "@currency_pair" },
-              { aggregation = "latest", facet = "@event_type" },
-              { aggregation = "latest", facet = "@demo_scenario_id" },
-              { aggregation = "count", facet = "count" },
-            ]
-          }
-          columns = [
-            { field = "group_by", width = "auto" },
-            { field = "@currency_pair:latest", width = "auto" },
-            { field = "@event_type:latest", width = "auto" },
-            { field = "@demo_scenario_id:latest", width = "auto" },
-            { field = "timeline", width = "auto" },
-            { field = "duration", width = "auto" },
-            { field = "max_severity", width = "auto" },
-            { field = "count:count", width = "auto" },
           ]
         }]
       }
@@ -579,17 +770,19 @@ locals {
           response_format = "event_list"
           query = {
             data_source  = "logs_transaction_stream"
-            query_string = "env:$env.value @order_id:$order_id.value service:(order-service OR pre-trade-control-service OR execution-adapter OR position-service OR risk-service OR confirmation-service OR settlement-service OR order-state-service OR dead-letter-service)"
+            query_string = "env:$env.value ${local.order_filter} service:(${local.lifecycle_services})"
             group_by     = [{ facet = "@order_id" }]
             compute = [
-              { aggregation = "latest", facet = "@currency_pair" },
+              { aggregation = "latest", facet = "@account_id" },
+              { aggregation = "latest", facet = "@symbol" },
               { aggregation = "latest", facet = "@event_type" },
               { aggregation = "count", facet = "count" },
             ]
           }
           columns = [
             { field = "group_by", width = "auto" },
-            { field = "@currency_pair:latest", width = "auto" },
+            { field = "@account_id:latest", width = "auto" },
+            { field = "@symbol:latest", width = "auto" },
             { field = "@event_type:latest", width = "auto" },
             { field = "timeline", width = "auto" },
             { field = "duration", width = "auto" },
@@ -614,6 +807,7 @@ locals {
     { x = 6, y = 5, width = 6, height = 3 },
     { x = 0, y = 8, width = 6, height = 3 },
     { x = 6, y = 8, width = 6, height = 3 },
+    { x = 0, y = 11, width = 6, height = 3 },
   ]
 
   cli_control_widget_layouts = [
@@ -631,9 +825,12 @@ locals {
     { x = 3, y = 2, width = 3, height = 2 },
     { x = 6, y = 2, width = 3, height = 2 },
     { x = 9, y = 2, width = 3, height = 2 },
-    { x = 0, y = 4, width = 4, height = 2 },
-    { x = 4, y = 4, width = 4, height = 2 },
-    { x = 8, y = 4, width = 4, height = 2 },
+    { x = 0, y = 4, width = 3, height = 2 },
+    { x = 3, y = 4, width = 3, height = 2 },
+    { x = 6, y = 4, width = 3, height = 2 },
+    { x = 9, y = 4, width = 3, height = 2 },
+    { x = 0, y = 6, width = 6, height = 2 },
+    { x = 6, y = 6, width = 6, height = 2 },
   ]
 
   business_flow_widget_layouts = [
@@ -711,7 +908,7 @@ locals {
     {
       definition = {
         type             = "group"
-        title            = "1 · Executive Summary · current business health"
+        title            = "1 · Executive Summary · customer impact at a glance"
         layout_type      = "ordered"
         show_title       = true
         background_color = "transparent"
@@ -721,7 +918,7 @@ locals {
     {
       definition = {
         type             = "group"
-        title            = "2 · Business Flow & Mix · throughput, notional, latency, and exceptions"
+        title            = "2 · Business Flow & Market · orders, executions, prices, buying power, and notifications"
         layout_type      = "ordered"
         show_title       = true
         background_color = "transparent"
@@ -731,7 +928,7 @@ locals {
     {
       definition = {
         type             = "group"
-        title            = "3 · Orders Requiring Attention · open one order and inspect its lifecycle"
+        title            = "3 · Orders Requiring Attention · open one order or account and inspect its lifecycle"
         layout_type      = "ordered"
         show_title       = true
         background_color = "transparent"
@@ -760,12 +957,13 @@ locals {
     },
   ]
 
+  # Group height = widget rows + 2 for the group title.
   demo_overview_group_layouts = [
-    { x = 0, y = 2, width = 12, height = 8 },
-    { x = 0, y = 10, width = 12, height = 14 },
-    { x = 0, y = 24, width = 12, height = 10 },
-    { x = 0, y = 34, width = 12, height = 8 },
-    { x = 0, y = 42, width = 12, height = 8 },
+    { x = 0, y = 2, width = 12, height = 10 },
+    { x = 0, y = 12, width = 12, height = 20 },
+    { x = 0, y = 32, width = 12, height = 10 },
+    { x = 0, y = 42, width = 12, height = 11 },
+    { x = 0, y = 53, width = 12, height = 8 },
   ]
 
   fixed_demo_overview_group_widgets = [
@@ -806,10 +1004,10 @@ locals {
   ]
 }
 
-resource "datadog_dashboard_json" "fx_demo" {
+resource "datadog_dashboard_json" "brokerage_demo" {
   dashboard = jsonencode({
-    title       = "FX Order Flow · Datadog Data Streams Monitoring Demo"
-    description = var.enable_workflows ? "Fictional FX order lifecycle. Detect business impact, drill down to one order, diagnose the responsible stream or service, and verify recovery in one Demo Overview; operational workflows remain on a separate Operator Controls tab." : "Fictional FX order lifecycle. Detect business impact, drill down to one order, diagnose the responsible stream or service, and verify recovery in one Demo Overview; the Operator Controls tab explains the CLI fallback."
+    title       = "Online Brokerage Order Flow · Datadog Data Streams Monitoring Demo"
+    description = var.enable_workflows ? "Fictional online-brokerage (ネット証券) cash-equity order flow. Detect customer impact, drill down to one order or account, diagnose the responsible stream or service, and verify recovery in one Demo Overview; scenario workflows remain on a separate Operator Controls tab." : "Fictional online-brokerage (ネット証券) cash-equity order flow. Detect customer impact, drill down to one order or account, diagnose the responsible stream or service, and verify recovery in one Demo Overview; the Operator Controls tab explains the CLI fallback."
     layout_type = "ordered"
     reflow_type = "fixed"
     notify_list = null
@@ -823,6 +1021,11 @@ resource "datadog_dashboard_json" "fx_demo" {
       {
         name     = "order_id"
         prefix   = "@order_id"
+        defaults = ["*"]
+      },
+      {
+        name     = "account_id"
+        prefix   = "@account_id"
         defaults = ["*"]
       },
     ]

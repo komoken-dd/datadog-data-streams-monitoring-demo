@@ -34,47 +34,77 @@ variable "enable_workflows" {
   default     = false
 }
 
-variable "generator_connection_id" {
-  description = "Private HTTP connection ID whose base URL is http://order-generator.fx-demo.svc.cluster.local:8080."
+variable "simulator_connection_id" {
+  description = "Private HTTP connection ID whose base URL is http://order-flow-simulator.brokerage-demo.svc.cluster.local:8080."
   type        = string
   default     = null
   nullable    = true
 
   validation {
     condition = !var.enable_workflows || (
-      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", coalesce(var.generator_connection_id, ""))) &&
-      coalesce(var.generator_connection_id, "") != "00000000-0000-0000-0000-000000000000"
+      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", coalesce(var.simulator_connection_id, ""))) &&
+      coalesce(var.simulator_connection_id, "") != "00000000-0000-0000-0000-000000000000"
     )
-    error_message = "generator_connection_id must be a non-zero Private HTTP Connection UUID when enable_workflows is true."
+    error_message = "simulator_connection_id must be a non-zero Private HTTP Connection UUID when enable_workflows is true."
   }
 }
 
-variable "execution_connection_id" {
-  description = "Private HTTP connection ID whose base URL is http://execution-adapter.fx-demo.svc.cluster.local:8080."
+variable "exchange_connection_id" {
+  description = "Private HTTP connection ID whose base URL is http://exchange-gateway-simulator.brokerage-demo.svc.cluster.local:8080."
   type        = string
   default     = null
   nullable    = true
 
   validation {
     condition = !var.enable_workflows || (
-      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", coalesce(var.execution_connection_id, ""))) &&
-      coalesce(var.execution_connection_id, "") != "00000000-0000-0000-0000-000000000000"
+      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", coalesce(var.exchange_connection_id, ""))) &&
+      coalesce(var.exchange_connection_id, "") != "00000000-0000-0000-0000-000000000000"
     )
-    error_message = "execution_connection_id must be a non-zero Private HTTP Connection UUID when enable_workflows is true."
+    error_message = "exchange_connection_id must be a non-zero Private HTTP Connection UUID when enable_workflows is true."
   }
 }
 
-variable "dead_letter_connection_id" {
-  description = "Private HTTP connection ID whose base URL is http://dead-letter-service.fx-demo.svc.cluster.local:8080."
+variable "buying_power_connection_id" {
+  description = "Private HTTP connection ID whose base URL is http://buying-power-service.brokerage-demo.svc.cluster.local:8080."
   type        = string
   default     = null
   nullable    = true
 
   validation {
     condition = !var.enable_workflows || (
-      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", coalesce(var.dead_letter_connection_id, ""))) &&
-      coalesce(var.dead_letter_connection_id, "") != "00000000-0000-0000-0000-000000000000"
+      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", coalesce(var.buying_power_connection_id, ""))) &&
+      coalesce(var.buying_power_connection_id, "") != "00000000-0000-0000-0000-000000000000"
     )
-    error_message = "dead_letter_connection_id must be a non-zero Private HTTP Connection UUID when enable_workflows is true."
+    error_message = "buying_power_connection_id must be a non-zero Private HTTP Connection UUID when enable_workflows is true."
+  }
+}
+
+variable "push_gateway_connection_id" {
+  description = "Private HTTP connection ID whose base URL is http://push-gateway-simulator.brokerage-demo.svc.cluster.local:8080."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = !var.enable_workflows || (
+      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", coalesce(var.push_gateway_connection_id, ""))) &&
+      coalesce(var.push_gateway_connection_id, "") != "00000000-0000-0000-0000-000000000000"
+    )
+    error_message = "push_gateway_connection_id must be a non-zero Private HTTP Connection UUID when enable_workflows is true."
+  }
+}
+
+variable "exception_connection_id" {
+  description = "Private HTTP connection ID whose base URL is http://exception-management-service.brokerage-demo.svc.cluster.local:8080."
+  type        = string
+  default     = null
+  nullable    = true
+
+  validation {
+    condition = !var.enable_workflows || (
+      can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$", coalesce(var.exception_connection_id, ""))) &&
+      coalesce(var.exception_connection_id, "") != "00000000-0000-0000-0000-000000000000"
+    )
+    error_message = "exception_connection_id must be a non-zero Private HTTP Connection UUID when enable_workflows is true."
   }
 }

@@ -1,5 +1,5 @@
 output "dashboard_url" {
-  value = datadog_dashboard_json.fx_demo.url
+  value = datadog_dashboard_json.brokerage_demo.url
 }
 
 output "workflow_ids" {
