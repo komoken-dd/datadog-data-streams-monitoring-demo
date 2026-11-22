@@ -1,15 +1,15 @@
 spring:
   application.name: order-state-service
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://postgresql:5432/fxdemo}
-    username: ${DATABASE_USERNAME:fxdemo}
-    password: ${DATABASE_PASSWORD:fxdemo}
+    url: ${DATABASE_URL:jdbc:postgresql://postgresql:5432/brokerage}
+    username: ${DATABASE_USERNAME:brokerage}
+    password: ${DATABASE_PASSWORD:brokerage}
   flyway:
-    table: flyway_schema_history_order_state
+    table: flyway_schema_history_order_state_service
     baseline-on-migrate: true
     baseline-version: 0
   kafka:
-    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:fx-kafka-kafka-bootstrap:9092}
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:brokerage-kafka-kafka-bootstrap:9092}
     consumer:
       auto-offset-reset: earliest
       enable-auto-commit: false
@@ -20,5 +20,5 @@ management:
     flavor: datadog
     host: ${DD_AGENT_HOST:localhost}
     port: ${DD_DOGSTATSD_PORT:8125}
-    polling-frequency: 5s
+    polling-frequency: 10s
 logging.structured.format.console: logstash

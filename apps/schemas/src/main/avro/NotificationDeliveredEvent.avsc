@@ -1,0 +1,89 @@
+{
+  "type": "record",
+  "name": "NotificationDeliveredEvent",
+  "namespace": "io.github.komokendd.dsm.brokerage.schema",
+  "doc": "Customer notification accepted by the push provider.",
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "string"
+    },
+    {
+      "name": "eventType",
+      "type": "string",
+      "default": "NOTIFICATION_DELIVERED"
+    },
+    {
+      "name": "eventVersion",
+      "type": "int",
+      "default": 1
+    },
+    {
+      "name": "occurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "accountId",
+      "type": "string"
+    },
+    {
+      "name": "orderId",
+      "type": "string"
+    },
+    {
+      "name": "symbol",
+      "type": "string"
+    },
+    {
+      "name": "side",
+      "type": "string",
+      "doc": "BUY or SELL"
+    },
+    {
+      "name": "demoScenarioId",
+      "type": [
+        "null",
+        "string"
+      ],
+      "default": null
+    },
+    {
+      "name": "notificationId",
+      "type": "string"
+    },
+    {
+      "name": "sourceEventId",
+      "type": "string"
+    },
+    {
+      "name": "notificationType",
+      "type": "string"
+    },
+    {
+      "name": "attempts",
+      "type": "int"
+    },
+    {
+      "name": "redriven",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "name": "sourceOccurredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    },
+    {
+      "name": "deliveredAt",
+      "type": {
+        "type": "long",
+        "logicalType": "timestamp-millis"
+      }
+    }
+  ]
+}

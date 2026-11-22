@@ -1,0 +1,11 @@
+spring:
+  application.name: push-gateway-simulator
+management:
+  endpoints.web.exposure.include: health,info,metrics
+  statsd.metrics.export:
+    enabled: ${DD_METRICS_ENABLED:false}
+    flavor: datadog
+    host: ${DD_AGENT_HOST:localhost}
+    port: ${DD_DOGSTATSD_PORT:8125}
+    polling-frequency: 10s
+logging.structured.format.console: logstash

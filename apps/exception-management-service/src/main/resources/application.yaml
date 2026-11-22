@@ -1,0 +1,30 @@
+spring:
+  application.name: exception-management-service
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://postgresql:5432/brokerage}
+    username: ${DATABASE_USERNAME:brokerage}
+    password: ${DATABASE_PASSWORD:brokerage}
+  flyway:
+    table: flyway_schema_history_exception_management_service
+    baseline-on-migrate: true
+    baseline-version: 0
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:brokerage-kafka-kafka-bootstrap:9092}
+    consumer:
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: io.github.komokendd.dsm.brokerage.common.AvroSpecificSerializer
+      acks: all
+      properties.enable.idempotence: true
+    template.observation-enabled: true
+management:
+  endpoints.web.exposure.include: health,info,metrics
+  statsd.metrics.export:
+    enabled: ${DD_METRICS_ENABLED:false}
+    flavor: datadog
+    host: ${DD_AGENT_HOST:localhost}
+    port: ${DD_DOGSTATSD_PORT:8125}
+    polling-frequency: 10s
+logging.structured.format.console: logstash
