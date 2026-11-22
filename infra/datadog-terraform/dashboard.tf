@@ -206,7 +206,7 @@ locals {
         title       = "Unfilled SELL quantity · now"
         description = "Shares still open on working SELL orders. Rises sharply when a sell-off pushes a symbol to limit-down (ストップ安) and buyers disappear."
         requests = [{
-          q          = "sum:demo.brokerage.orders.unfilled_quantity{env:$env.value,side:SELL}"
+          q          = "sum:demo.brokerage.orders.unfilled_quantity{env:$env.value,side:sell}"
           aggregator = "last"
         }]
         autoscale   = true
@@ -478,7 +478,7 @@ locals {
         show_legend = true
         requests = [
           { q = "sum:demo.brokerage.orders.rejected{env:$env.value} by {reason}.as_count()", display_type = "bars", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
-          { q = "sum:demo.brokerage.orders.rejected{env:$env.value,reason:INSUFFICIENT_BUYING_POWER}.as_count()", display_type = "line", style = { palette = "red", line_type = "solid", line_width = "thick" } },
+          { q = "sum:demo.brokerage.orders.rejected{env:$env.value,reason:insufficient_buying_power}.as_count()", display_type = "line", style = { palette = "red", line_type = "solid", line_width = "thick" } },
           { q = "sum:demo.brokerage.simulator.switch_trades{env:$env.value} by {result}.as_count()", display_type = "line", style = { palette = "cool", line_type = "dashed", line_width = "normal" }, on_right_yaxis = true },
         ]
       }
