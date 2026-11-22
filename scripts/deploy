@@ -113,6 +113,18 @@ else
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
+# The same key=value pairs used for the CDK stack tag the EBS volumes created
+# for Kafka and PostgreSQL, which do not inherit the stack tags.
+volume_tag_args=()
+IFS=',' read -r -a resource_tags <<<"${BROKERAGE_DEMO_RESOURCE_TAGS:-}"
+for pair in "${resource_tags[@]:-}"; do
+  pair="${pair// /}"
+  [[ -z "${pair}" ]] && continue
+  [[ "${pair}" =~ ^[A-Za-z0-9_.:/@+-]+=[A-Za-z0-9_.:/@+-]+$ ]] \
+    || die "BROKERAGE_DEMO_RESOURCE_TAGS entries must be key=value: ${pair}"
+  volume_tag_args+=(--set-string "storageClass.volumeTags.${pair}")
+done
+
 helm upgrade --install brokerage-demo "${PROJECT_ROOT}/deploy/helm/brokerage-demo" \
   --namespace "${BROKERAGE_NAMESPACE}" \
   --values "${PROJECT_ROOT}/deploy/values/values-eks.yaml" \
@@ -120,6 +132,7 @@ helm upgrade --install brokerage-demo "${PROJECT_ROOT}/deploy/helm/brokerage-dem
   --set-string "datadog.site=${DD_SITE}" \
   --set-string "datadog.secretName=${datadog_secret_name}" \
   --set-string "datadog.dsm.orderStateServiceEnabled=${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}" \
+  ${volume_tag_args[@]+"${volume_tag_args[@]}"} \
   --wait \
   --timeout 15m
 

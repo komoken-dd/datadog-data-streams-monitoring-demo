@@ -30,6 +30,8 @@ tradeReport:
 storageClass:
   create: false
   name: gp3
+  # EBS volume tags applied by the EBS CSI driver, for example owner or cost center.
+  volumeTags: {}
 
 applications:
   - name: order-flow-simulator
