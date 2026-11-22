@@ -218,14 +218,14 @@ locals {
       definition = {
         type        = "query_value"
         title       = "Current scenario · now"
-        description = "Scenario currently driven by order-flow-simulator: 0 = stopped, 1 = baseline, 2 = opening rush (寄付き集中), 3 = news-driven sell-off (材料による売り殺到)."
+        description = "Scenario currently driven by order-flow-simulator: -1 = stopped, 0 = baseline, 1 = opening rush (寄付き集中), 2 = news-driven sell-off (材料による売り殺到)."
         requests = [{
           q          = "max:demo.brokerage.scenario.current{env:$env.value}"
           aggregator = "last"
           conditional_formats = [
-            { comparator = "=", value = 0, palette = "white_on_gray" },
-            { comparator = "=", value = 1, palette = "white_on_green" },
-            { comparator = ">=", value = 2, palette = "white_on_yellow" },
+            { comparator = "<", value = 0, palette = "white_on_gray" },
+            { comparator = "=", value = 0, palette = "white_on_green" },
+            { comparator = ">=", value = 1, palette = "white_on_yellow" },
           ]
         }]
         autoscale = false
