@@ -21,6 +21,7 @@ import java.time.Instant;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 /**
  * Order intake: validate, reserve buying power synchronously, then publish.
@@ -119,7 +120,20 @@ final class OrderIntakeService {
 
     private OrderResult reject(ValidatedOrder order, int status, String reason, String message) {
         countRejected(order.symbol(), order.side().name(), reason);
-        LOG.info("Order rejected, reason={}", reason);
+        // Called inside the order's log context; relabel the line so rejected orders are searchable.
+        String acceptedType = MDC.get("event_type");
+        MDC.put("event_type", "ORDER_REJECTED");
+        MDC.put("reason", reason);
+        try {
+            LOG.info("Order rejected, reason={}", reason);
+        } finally {
+            MDC.remove("reason");
+            if (acceptedType == null) {
+                MDC.remove("event_type");
+            } else {
+                MDC.put("event_type", acceptedType);
+            }
+        }
         return new OrderResult.Failed(status, reason, message);
     }
 
@@ -136,7 +150,7 @@ final class OrderIntakeService {
                         "ORDER_REJECTED",
                         symbolTag,
                         request == null ? null : request.demoScenarioId())
-                .attribute("reject_reason", INVALID_ORDER)) {
+                .attribute("reason", INVALID_ORDER)) {
             LOG.info("Invalid order rejected: {}", message);
         }
         return new OrderResult.Failed(400, INVALID_ORDER, message);

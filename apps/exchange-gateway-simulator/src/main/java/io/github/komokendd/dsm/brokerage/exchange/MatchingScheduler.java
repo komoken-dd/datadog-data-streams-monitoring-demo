@@ -119,7 +119,8 @@ class MatchingScheduler {
             try (var ignored = EventLogContext.open(
                     event.getAccountId(), event.getOrderId(), event.getEventId(), event.getEventType(),
                     event.getSymbol(), event.getDemoScenarioId())
-                    .attribute("expiry_reason", event.getReason())) {
+                    .attribute("side", event.getSide())
+                    .attribute("reason", event.getReason())) {
                 sends.add(kafka.send(Topics.ORDERS_EXPIRED, event.getAccountId(), event));
                 LOG.info("Order expired: {} of {} shares unfilled ({})",
                         event.getExpiredQuantity(), event.getQuantity(), event.getReason());
