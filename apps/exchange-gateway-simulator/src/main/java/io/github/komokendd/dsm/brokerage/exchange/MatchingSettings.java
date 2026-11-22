@@ -20,5 +20,5 @@ public record MatchingSettings(
         int maxOpeningTicksFromBase,
         Duration maxWorkingAge) {
     public static final MatchingSettings DEFAULTS =
-            new MatchingSettings(0.6, 0.15, 1_500, 10, 3, Duration.ofMinutes(10));
+            new MatchingSettings(0.6, 0.15, 4_000, 2, 3, Duration.ofMinutes(10));
 }

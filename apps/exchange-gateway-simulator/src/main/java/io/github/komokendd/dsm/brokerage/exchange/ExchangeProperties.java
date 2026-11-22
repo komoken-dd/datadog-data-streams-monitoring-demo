@@ -35,7 +35,7 @@ public record ExchangeProperties(
             randomWalkProbability = 0.15;
         }
         if (sellPressureSharesPerTick <= 0) {
-            sellPressureSharesPerTick = 1_500;
+            sellPressureSharesPerTick = 4_000;
         }
         if (completedRetentionMinutes <= 0) {
             completedRetentionMinutes = 60;

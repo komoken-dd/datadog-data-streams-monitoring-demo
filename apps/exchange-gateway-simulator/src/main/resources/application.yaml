@@ -37,5 +37,5 @@ demo:
     max-working-age-seconds: ${EXCHANGE_MAX_WORKING_AGE_SECONDS:600}
     full-fill-probability: ${EXCHANGE_FULL_FILL_PROBABILITY:0.6}
     random-walk-probability: ${EXCHANGE_RANDOM_WALK_PROBABILITY:0.15}
-    sell-pressure-shares-per-tick: ${EXCHANGE_SELL_PRESSURE_SHARES_PER_TICK:1500}
+    sell-pressure-shares-per-tick: ${EXCHANGE_SELL_PRESSURE_SHARES_PER_TICK:4000}
     completed-retention-minutes: ${EXCHANGE_COMPLETED_RETENTION_MINUTES:60}
