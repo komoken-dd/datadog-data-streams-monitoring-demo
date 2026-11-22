@@ -64,7 +64,7 @@ Topic、PostgreSQL で構成されます。付属の Datadog Terraform は、Das
 以前のバージョンの Dashboard と DSM の Screenshot は削除しました。ネット証券版の
 Screenshot は改めて取得する予定です。
 
-Dashboard の **Operator Controls** Tab は、Workflow Automation と Agent-based
+Dashboard の **デモ操作** (Operator Controls) Tab は、Workflow Automation と Agent-based
 Private Action Runner を通じてシナリオを実行します。Control Endpoint は
 ClusterIP 限定です。Kubernetes Context を検証する `scripts/demo-control` CLI を
 使用すれば、Workflow Automation なしでも同じ操作を実行できます。Dashboard の
@@ -159,7 +159,7 @@ Tracer は対応する Kafka Client を自動計装し、Trace と DSM Pathway C
 
 ## デモシナリオ
 
-Dashboard の **Operator Controls** または CLI Fallback を使用します。
+Dashboard の **デモ操作** (Operator Controls) または CLI Fallback を使用します。
 
 ```bash
 scripts/demo-control <kind|eks> <baseline|stop|opening-rush|sell-off|buying-power-delay|push-outage|redrive>

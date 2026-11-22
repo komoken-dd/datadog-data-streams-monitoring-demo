@@ -78,11 +78,11 @@ this synthetic demo.
 
 | Suggested name | Base URL | Terraform variable | Used by |
 |---|---|---|---|
-| `brokerage-demo-simulator` | `http://order-flow-simulator.brokerage-demo.svc.cluster.local:8080` | `simulator_connection_id` | Reset to Baseline, Stop Order Flow, Opening Rush, Sell-Off |
-| `brokerage-demo-exchange` | `http://exchange-gateway-simulator.brokerage-demo.svc.cluster.local:8080` | `exchange_connection_id` | Reset to Baseline |
-| `brokerage-demo-buying-power` | `http://buying-power-service.brokerage-demo.svc.cluster.local:8080` | `buying_power_connection_id` | Reset to Baseline, Delay Buying-Power Reflection |
-| `brokerage-demo-push-gateway` | `http://push-gateway-simulator.brokerage-demo.svc.cluster.local:8080` | `push_gateway_connection_id` | Reset to Baseline, Push Provider Outage |
-| `brokerage-demo-exception` | `http://exception-management-service.brokerage-demo.svc.cluster.local:8080` | `exception_connection_id` | Redrive Undelivered Notifications |
+| `brokerage-demo-simulator` | `http://order-flow-simulator.brokerage-demo.svc.cluster.local:8080` | `simulator_connection_id` | ベースラインに戻す, 注文フロー停止, 寄付き集中, 材料による売り殺到 |
+| `brokerage-demo-exchange` | `http://exchange-gateway-simulator.brokerage-demo.svc.cluster.local:8080` | `exchange_connection_id` | ベースラインに戻す |
+| `brokerage-demo-buying-power` | `http://buying-power-service.brokerage-demo.svc.cluster.local:8080` | `buying_power_connection_id` | ベースラインに戻す, 買付余力の反映遅延 |
+| `brokerage-demo-push-gateway` | `http://push-gateway-simulator.brokerage-demo.svc.cluster.local:8080` | `push_gateway_connection_id` | ベースラインに戻す, プッシュ通知事業者の障害 |
+| `brokerage-demo-exception` | `http://exception-management-service.brokerage-demo.svc.cluster.local:8080` | `exception_connection_id` | 未達通知の再送 (Redrive) |
 
 These are the same five hostnames as the Helm chart's PAR `http_allowlist`.
 A base URL for any other host is rejected by the runner.
@@ -114,19 +114,19 @@ The five IDs are optional only while `enable_workflows` is false. Terraform
 rejects missing, zero, or malformed IDs when workflows are enabled.
 
 Apply creates seven workflows, each with a dashboard button on the
-**Operator Controls** tab:
+**デモ操作** (Operator Controls) tab:
 
 | Workflow | Button | Endpoint |
 |---|---|---|
-| Brokerage Demo - Reset to Baseline | **Reset to Baseline** | Four steps: simulator `/internal/demo/baseline`, exchange `/internal/demo/reset`, buying-power `/internal/demo/recover`, push gateway `/internal/demo/recover` |
-| Brokerage Demo - Stop Order Flow | **Stop Order Flow** | simulator `/internal/demo/stop` |
-| Brokerage Demo - Opening Rush | **Opening Rush (寄付き集中) 60s** | simulator `/internal/demo/opening-rush` |
-| Brokerage Demo - News-Driven Sell-Off on D105 | **News-Driven Sell-Off on D105 (材料による売り殺到)** | simulator `/internal/demo/sell-off` |
-| Brokerage Demo - Delay Buying-Power Reflection | **Delay Buying-Power Reflection** | buying-power `/internal/demo/delay` |
-| Brokerage Demo - Push Provider Outage | **Push Provider Outage** | push gateway `/internal/demo/outage` |
-| Brokerage Demo - Redrive Undelivered Notifications | **Redrive Undelivered Notifications** | exception management `/internal/demo/redrive` |
+| 証券デモ - ベースラインに戻す | **ベースラインに戻す** | Four steps: simulator `/internal/demo/baseline`, exchange `/internal/demo/reset`, buying-power `/internal/demo/recover`, push gateway `/internal/demo/recover` |
+| 証券デモ - 注文フロー停止 | **注文フロー停止** | simulator `/internal/demo/stop` |
+| 証券デモ - 寄付き集中 | **寄付き集中 · 60秒** | simulator `/internal/demo/opening-rush` |
+| 証券デモ - 材料による売り殺到 · D105 | **材料による売り殺到 · D105** | simulator `/internal/demo/sell-off` |
+| 証券デモ - 買付余力の反映遅延 | **買付余力の反映遅延** | buying-power `/internal/demo/delay` |
+| 証券デモ - プッシュ通知事業者の障害 | **プッシュ通知事業者の障害** | push gateway `/internal/demo/outage` |
+| 証券デモ - 未達通知の再送 (Redrive) | **未達通知の再送 (Redrive)** | exception management `/internal/demo/redrive` |
 
-After apply, run **Reset to Baseline** from **Operator Controls** and verify its
+After apply, run **ベースラインに戻す** (Reset to Baseline) from **デモ操作** (Operator Controls) and verify its
 Workflow run history before trying the other scenarios.
 
 ## Official documentation

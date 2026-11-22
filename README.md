@@ -67,7 +67,7 @@ After deployment, you can:
 Dashboard and DSM screenshots from the previous version of this demo were
 removed and will be recaptured for the online-brokerage version.
 
-The dashboard's **Operator Controls** tab runs the scenarios through Workflow
+The dashboard's **デモ操作** (Operator Controls) tab runs the scenarios through Workflow
 Automation and an Agent-based Private Action Runner; the control endpoints
 remain ClusterIP-only. The context-validating `scripts/demo-control` CLI
 provides the same controls without Workflow Automation. See the
@@ -166,7 +166,7 @@ conventions.
 
 ## Demo scenarios
 
-Use the dashboard's **Operator Controls** or the CLI fallback:
+Use the dashboard's **デモ操作** (Operator Controls) or the CLI fallback:
 
 ```bash
 scripts/demo-control <kind|eks> <baseline|stop|opening-rush|sell-off|buying-power-delay|push-outage|redrive>

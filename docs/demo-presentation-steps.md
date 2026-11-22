@@ -4,7 +4,7 @@ This guide describes the five scenarios and a repeatable presentation built
 from them. Use the [demo runbook](demo-runbook.md) for deployment and recovery
 commands.
 
-Each scenario can be started from the dashboard's **Operator Controls** tab
+Each scenario can be started from the dashboard's **デモ操作** (Operator Controls) tab
 when Workflow Automation is enabled, or with the CLI:
 
 ```bash
@@ -13,15 +13,15 @@ scripts/demo-control <kind|eks> <baseline|stop|opening-rush|sell-off|buying-powe
 
 | Dashboard button | CLI action | Calls |
 |---|---|---|
-| **Reset to Baseline** | `baseline` | `order-flow-simulator` `/internal/demo/baseline`, `exchange-gateway-simulator` `/internal/demo/reset`, `buying-power-service` `/internal/demo/recover`, `push-gateway-simulator` `/internal/demo/recover` |
-| **Stop Order Flow** | `stop` | `order-flow-simulator` `/internal/demo/stop` |
-| **Opening Rush (寄付き集中) 60s** | `opening-rush` | `order-flow-simulator` `/internal/demo/opening-rush` |
-| **News-Driven Sell-Off on D105 (材料による売り殺到)** | `sell-off` | `order-flow-simulator` `/internal/demo/sell-off` |
-| **Delay Buying-Power Reflection** | `buying-power-delay` | `buying-power-service` `/internal/demo/delay` |
-| **Push Provider Outage** | `push-outage` | `push-gateway-simulator` `/internal/demo/outage` |
-| **Redrive Undelivered Notifications** | `redrive` | `exception-management-service` `/internal/demo/redrive` |
+| **ベースラインに戻す** | `baseline` | `order-flow-simulator` `/internal/demo/baseline`, `exchange-gateway-simulator` `/internal/demo/reset`, `buying-power-service` `/internal/demo/recover`, `push-gateway-simulator` `/internal/demo/recover` |
+| **注文フロー停止** | `stop` | `order-flow-simulator` `/internal/demo/stop` |
+| **寄付き集中 · 60秒** | `opening-rush` | `order-flow-simulator` `/internal/demo/opening-rush` |
+| **材料による売り殺到 · D105** | `sell-off` | `order-flow-simulator` `/internal/demo/sell-off` |
+| **買付余力の反映遅延** | `buying-power-delay` | `buying-power-service` `/internal/demo/delay` |
+| **プッシュ通知事業者の障害** | `push-outage` | `push-gateway-simulator` `/internal/demo/outage` |
+| **未達通知の再送 (Redrive)** | `redrive` | `exception-management-service` `/internal/demo/redrive` |
 
-The dashboard's **Demo Overview** tab has five groups referenced below:
+The dashboard's **デモ概要** (Demo Overview) tab has five groups referenced below:
 **1 · Executive Summary**, **2 · Business Flow & Market**,
 **3 · Orders Requiring Attention**, **4 · Streaming & Application Diagnosis**,
 and **5 · Kafka & Kubernetes Runtime**.
@@ -35,7 +35,7 @@ scenario runs.
 
 ### 1. Opening rush (寄付き集中)
 
-**Trigger:** **Opening Rush (寄付き集中) 60s** or `opening-rush`.
+**Trigger:** **寄付き集中 · 60秒** or `opening-rush`.
 
 The simulator puts the exchange into a 60-second pre-open session and submits
 25 orders/s. Orders are accepted and reserved but do not fill. When the
@@ -61,7 +61,7 @@ and order inquiry must all absorb the burst.
 
 ### 2. Buying-power reflection delay (「売ったのに買えない」)
 
-**Trigger:** **Delay Buying-Power Reflection** or `buying-power-delay`.
+**Trigger:** **買付余力の反映遅延** or `buying-power-delay`.
 
 `buying-power-service` adds 2,500 ms of processing to every execution and
 expiry it consumes. Other consumers of the same topic are unaffected.
@@ -91,12 +91,12 @@ immediately buys with the proceeds (a switch trade) is rejected with
   synchronous reservation call inside `POST /orders` stays fast. The
   bottleneck is the asynchronous reflection, not the order check.
 
-**Recovery:** **Reset to Baseline** drained the lag in under 10 seconds in the
+**Recovery:** **ベースラインに戻す** drained the lag in under 10 seconds in the
 verification run.
 
 ### 3. Push provider outage and redrive
 
-**Trigger:** **Push Provider Outage** or `push-outage`.
+**Trigger:** **プッシュ通知事業者の障害** or `push-outage`.
 
 The push gateway answers every request with HTTP 503 after about 800 ms.
 `notification-service` routes each failed notification to the 5-second retry
@@ -120,8 +120,8 @@ that their orders filled or expired.
 - **Notification dead letters · customers not yet notified** in
   **3 · Orders Requiring Attention** lists the affected orders.
 
-**Recovery and redrive:** run **Reset to Baseline** first so the push provider
-is healthy, then **Redrive Undelivered Notifications**. The CLI prints the
+**Recovery and redrive:** run **ベースラインに戻す** first so the push provider
+is healthy, then **未達通知の再送 (Redrive)**. The CLI prints the
 result, for example `{"redrivenCount":265,...}`. Unresolved dead letters and
 undelivered notifications return to zero within about 12 seconds, and the
 push gateway's `duplicate` result does not increase: each customer receives
@@ -131,7 +131,7 @@ notifications through the retry topics to the DLT again.
 
 ### 4. Recovery
 
-**Trigger:** **Reset to Baseline** or `baseline`.
+**Trigger:** **ベースラインに戻す** or `baseline`.
 
 Reset restores baseline order flow, resets the exchange to a continuous
 session at base prices (cancelling any sell-off), removes the buying-power
@@ -145,7 +145,7 @@ letters stay until you redrive them.
 
 ### 5. News-driven sell-off (材料による売り殺到) and limit-down (ストップ安)
 
-**Trigger:** **News-Driven Sell-Off on D105 (材料による売り殺到)** or `sell-off`.
+**Trigger:** **材料による売り殺到 · D105** or `sell-off`.
 
 For 120 seconds the simulator adds about 25 sell orders/s for `D105` (Demo
 Semiconductor), mostly at market, on top of baseline traffic. The exchange
@@ -175,7 +175,7 @@ notifications.
 - Records are keyed by `account_id`, so the `D105` burst is spread across
   partitions instead of landing on a single symbol partition.
 
-`D105` stays at limit-down after the window until **Reset to Baseline** resets
+`D105` stays at limit-down after the window until **ベースラインに戻す** resets
 the exchange.
 
 ## Before presenting
@@ -207,7 +207,7 @@ system whose execution reports arrive independently of the order request.
 
 ### 2. Establish baseline
 
-Run **Reset to Baseline**.
+Run **ベースラインに戻す**.
 
 In **1 · Executive Summary**, confirm:
 
@@ -221,12 +221,12 @@ limit, and an account with a pending sell cannot sell the same shares again.
 
 ### 3. Opening rush
 
-Run **Opening Rush (寄付き集中) 60s** and narrate the pre-open accumulation,
+Run **寄付き集中 · 60秒** and narrate the pre-open accumulation,
 the auction burst, and the short lag that drains on its own.
 
 ### 4. Buying-power reflection delay
 
-Run **Delay Buying-Power Reflection**. Explain the evidence in this order:
+Run **買付余力の反映遅延**. Explain the evidence in this order:
 
 1. Switch-trade BUY rejections for insufficient buying power rise.
 2. Unreflected executions and the oldest unreflected age grow.
@@ -254,15 +254,15 @@ Choose one rejected switch-trade BUY or one order from the lifecycle list in
 
 ### 6. Restore the baseline
 
-Run **Reset to Baseline** and show lag and unreflected executions draining.
+Run **ベースラインに戻す** and show lag and unreflected executions draining.
 
 ## Extended stories
 
 ### 7. Push outage, DLT, and redrive
 
-Run **Push Provider Outage**. Show retries, then dead letters, the DSM retry
-and DLT pathways, and the monitor. Run **Reset to Baseline**, then
-**Redrive Undelivered Notifications**, and show unresolved dead letters
+Run **プッシュ通知事業者の障害**. Show retries, then dead letters, the DSM retry
+and DLT pathways, and the monitor. Run **ベースラインに戻す**, then
+**未達通知の再送 (Redrive)**, and show unresolved dead letters
 returning to zero with no push duplicates.
 
 Emphasize that only notifications have retry topics and a DLT. Orders are
@@ -270,9 +270,9 @@ never re-sent automatically.
 
 ### 8. Sell-off to limit-down
 
-Run **News-Driven Sell-Off on D105 (材料による売り殺到)**. Show the price
+Run **材料による売り殺到 · D105**. Show the price
 falling to limit-down, the unfilled sell quantity piling up, and the expiry
-burst at the end. Finish with **Reset to Baseline**.
+burst at the end. Finish with **ベースラインに戻す**.
 
 ## Closing points
 
