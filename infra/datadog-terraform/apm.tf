@@ -1,5 +1,5 @@
-resource "datadog_apm_retention_filter" "fx_demo_orders" {
-  name        = "[FX Demo] Retain searchable order traces"
+resource "datadog_apm_retention_filter" "brokerage_demo_orders" {
+  name        = "[Brokerage Demo] Retain searchable order traces"
   enabled     = true
   filter_type = "spans-sampling-processor"
   rate        = "1.0"
