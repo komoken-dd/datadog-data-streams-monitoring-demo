@@ -50,6 +50,8 @@ class ExchangeMetrics {
                 .tag("symbol", order.symbol())
                 .tag("side", order.side().name())
                 .baseUnit("JPY")
+                // Emitted as a Datadog distribution so amounts can be summed across hosts.
+                .publishPercentileHistogram()
                 .register(registry)
                 .record(Jpy.amount(fill.price(), fill.executedQuantity()).doubleValue());
         if (fill.firstExecution()) {
