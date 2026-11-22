@@ -9,40 +9,40 @@ locals {
 
   single_step_workflows = {
     stop_generation = {
-      name             = "Brokerage Demo - Stop Order Flow"
-      description      = "Stop new simulated customer orders while orders already accepted continue through execution, buying-power reflection, and notification."
+      name             = "証券デモ - 注文フロー停止"
+      description      = "新規の模擬注文を停止します。受付済みの注文は引き続き約定、買付余力への反映、通知まで処理されます。"
       handle           = "brokerage-demo-stop-order-flow"
       connection_id    = var.simulator_connection_id
       connection_label = "SIMULATOR_PRIVATE_HTTP"
       url              = "${local.simulator_base_url}/internal/demo/stop"
     }
     opening_rush = {
-      name             = "Brokerage Demo - Opening Rush"
-      description      = "Accumulate pre-open orders at 25 orders/s for 60 seconds, then release them in one opening-auction burst before returning to baseline."
+      name             = "証券デモ - 寄付き集中"
+      description      = "寄付き前の注文を毎秒 25 件で 60 秒間ため、板寄せで一斉に約定させた後、ベースラインに戻します。"
       handle           = "brokerage-demo-opening-rush"
       connection_id    = var.simulator_connection_id
       connection_label = "SIMULATOR_PRIVATE_HTTP"
       url              = "${local.simulator_base_url}/internal/demo/opening-rush"
     }
     sell_off = {
-      name             = "Brokerage Demo - News-Driven Sell-Off on D105"
-      description      = "Flood fictional symbol D105 with sell orders for 120 seconds so its price falls to limit-down and unfilled sell orders pile up, then return to baseline."
+      name             = "証券デモ - 材料による売り殺到 · D105"
+      description      = "架空銘柄 D105 に 120 秒間売り注文を殺到させ、株価をストップ安まで下落させて未約定の売り注文を積み上げた後、ベースラインに戻します。"
       handle           = "brokerage-demo-sell-off"
       connection_id    = var.simulator_connection_id
       connection_label = "SIMULATOR_PRIVATE_HTTP"
       url              = "${local.simulator_base_url}/internal/demo/sell-off"
     }
     buying_power_delay = {
-      name             = "Brokerage Demo - Delay Buying-Power Reflection"
-      description      = "Slow buying-power-service execution processing so sale proceeds are reflected late and switch trades are rejected for insufficient buying power."
+      name             = "証券デモ - 買付余力の反映遅延"
+      description      = "buying-power-service の約定処理を遅らせます。売却代金の反映が遅れ、乗り換え取引が買付余力不足で拒否されます。"
       handle           = "brokerage-demo-buying-power-delay"
       connection_id    = var.buying_power_connection_id
       connection_label = "BUYING_POWER_PRIVATE_HTTP"
       url              = "${local.buying_power_base_url}/internal/demo/delay"
     }
     push_outage = {
-      name             = "Brokerage Demo - Push Provider Outage"
-      description      = "Make the push gateway return 503 so customer notifications move through the retry topics into the DLT."
+      name             = "証券デモ - プッシュ通知事業者の障害"
+      description      = "プッシュゲートウェイが 503 を返すようにし、お客様向け通知を再試行トピック経由で DLT に送ります。"
       handle           = "brokerage-demo-push-outage"
       connection_id    = var.push_gateway_connection_id
       connection_label = "PUSH_GATEWAY_PRIVATE_HTTP"
@@ -94,8 +94,8 @@ resource "datadog_workflow_automation" "single_step" {
 resource "datadog_workflow_automation" "reset_baseline" {
   count = var.enable_workflows ? 1 : 0
 
-  name        = "Brokerage Demo - Reset to Baseline"
-  description = "Restore baseline order flow, a continuous exchange session at base prices, normal buying-power reflection, and a healthy push provider."
+  name        = "証券デモ - ベースラインに戻す"
+  description = "通常の注文フロー、基準価格でのザラバ（継続売買）、通常の買付余力反映、正常なプッシュ通知事業者の状態に戻します。"
   tags        = local.workflow_tags
   published   = true
 
@@ -171,8 +171,8 @@ resource "datadog_workflow_automation" "reset_baseline" {
 resource "datadog_workflow_automation" "redrive" {
   count = var.enable_workflows ? 1 : 0
 
-  name        = "Brokerage Demo - Redrive Undelivered Notifications"
-  description = "Redrive every unresolved notification dead letter to the 5s retry topic so customers finally receive their execution or expiry notification."
+  name        = "証券デモ - 未達通知の再送 (Redrive)"
+  description = "未解決の通知デッドレターをすべて 5 秒の再試行トピックへ再送 (Redrive) し、お客様に約定通知・失効通知を届けます。"
   tags        = local.workflow_tags
   published   = true
 

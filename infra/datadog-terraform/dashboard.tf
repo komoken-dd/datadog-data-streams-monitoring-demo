@@ -20,7 +20,7 @@ locals {
     [{
       definition = {
         type             = "note"
-        content          = "## Run brokerage scenarios\nRun **Reset to Baseline** before a scenario to start or resume normal order flow (3 orders/s) with a healthy exchange, buying-power service, and push provider. **Opening Rush** and **Sell-Off** return to baseline automatically; **Buying-Power Delay** and **Push Provider Outage** stay active until you reset. After an action, return to **Demo Overview** or open **Data Streams Monitoring**. Changes can take tens of seconds to appear. All symbols, accounts, and amounts are fictional."
+        content          = "## 証券シナリオの実行\nシナリオの前に **ベースラインに戻す** を実行すると、取引所・買付余力サービス・プッシュ通知事業者が正常な状態で、通常の注文フロー（毎秒 3 件）が開始または再開します。**寄付き集中** と **材料による売り殺到** は自動でベースラインに戻ります。**買付余力の反映遅延** と **プッシュ通知事業者の障害** はリセットするまで継続します。操作後は **デモ概要** タブに戻るか **Data Streams Monitoring** を開いてください。反映まで数十秒かかることがあります。銘柄・口座・金額はすべて架空です。"
         background_color = "blue"
         font_size        = "16"
         text_align       = "left"
@@ -31,56 +31,56 @@ locals {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Reset to Baseline"
-        description = "Business effect: baseline order flow resumes, the exchange returns to a continuous session at base prices, buying power is reflected promptly, and push notifications are delivered again. Observe: Demo Overview → Executive Summary; unreflected executions and DSM lag fall back to near zero."
+        title       = "ベースラインに戻す"
+        description = "業務影響: 通常の注文フローが再開し、取引所は基準価格でのザラバ（継続売買）に戻り、買付余力は即時に反映され、プッシュ通知も再び配信されます。確認先: デモ概要 → エグゼクティブサマリー。未反映約定と DSM のコンシューマ lag がほぼゼロに戻ります。"
       }
     }],
     [for name, workflow in datadog_workflow_automation.single_step : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Stop Order Flow"
-        description = "Business effect: no new customer orders are submitted; accepted orders still execute, update buying power, and notify customers. Observe: Demo Overview → Orders accepted stops rising and Working orders drains; DSM throughput falls as the pipeline empties."
+        title       = "注文フロー停止"
+        description = "業務影響: 新規注文の発注が止まります。受付済みの注文は引き続き約定し、買付余力を更新し、お客様に通知されます。確認先: デモ概要 → 受付注文の増加が止まり、未約定注文が減っていきます。パイプラインが空になるにつれて DSM のスループットも低下します。"
       }
     } if name == "stop_generation"],
     [for name, workflow in datadog_workflow_automation.single_step : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Opening Rush (寄付き集中) 60s"
-        description = "Business effect: pre-open orders accumulate for 60 seconds at 25 orders/s, then the opening auction (板寄せ) fills them in one burst. Observe: Working orders climbs then drops, Order-to-first-execution p95 jumps, and DSM lag on brokerage.executions.v1 spikes across all five consumers."
+        title       = "寄付き集中 · 60秒"
+        description = "業務影響: 寄付き前の注文が毎秒 25 件で 60 秒間たまり、板寄せで一斉に約定します。確認先: 未約定注文が増えた後に急減し、発注から初回約定までの p95 が跳ね上がり、brokerage.executions.v1 の DSM lag が 5 つのコンシューマすべてで急増します。"
       }
     } if name == "opening_rush"],
     [for name, workflow in datadog_workflow_automation.single_step : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "News-Driven Sell-Off on D105 (材料による売り殺到)"
-        description = "Business effect: sell orders for fictional symbol D105 surge for 120 seconds, the price falls to limit-down (ストップ安), and unfilled sell orders pile up and finally expire. Observe: Market price and limit-down flag, Unfilled SELL quantity, and Expired orders."
+        title       = "材料による売り殺到 · D105"
+        description = "業務影響: 架空銘柄 D105 に 120 秒間売り注文が殺到して株価がストップ安まで下落し、約定しない売り注文が積み上がって最終的に失効します。確認先: 株価とストップ安フラグ、売り未約定数量、失効注文。"
       }
     } if name == "sell_off"],
     [for name, workflow in datadog_workflow_automation.single_step : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Delay Buying-Power Reflection"
-        description = "Business effect: sale proceeds reach buying power (買付余力) late, so customers who sell and immediately buy are rejected — 「売ったのに買えない」. Observe: Unreflected executions, Reflection delay p95, and INSUFFICIENT_BUYING_POWER rejects; DSM lag for buying-power-service-v1 grows."
+        title       = "買付余力の反映遅延"
+        description = "業務影響: 売却代金の買付余力への反映が遅れ、売却直後に買付しようとするお客様の注文が拒否されます（「売ったのに買えない」）。確認先: 未反映約定、反映遅延 p95、INSUFFICIENT_BUYING_POWER による拒否。buying-power-service-v1 の DSM lag が増加します。"
       }
     } if name == "buying_power_delay"],
     [for name, workflow in datadog_workflow_automation.single_step : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Push Provider Outage"
-        description = "Business effect: trades are booked but customers stop receiving execution and expiry notifications; notifications retry after 5s and 30s, then land in the DLT. Observe: Push gateway results, Notification delivery delay, and Unresolved notification dead letters; DSM shows retry and DLT traffic."
+        title       = "プッシュ通知事業者の障害"
+        description = "業務影響: 約定は記帳されますが、約定通知・失効通知がお客様に届かなくなります。通知は 5 秒後と 30 秒後に再試行され、その後 DLT に移ります。確認先: プッシュゲートウェイの結果、通知配信遅延、未解決の通知デッドレター。DSM には再試行と DLT のトラフィックが表示されます。"
       }
     } if name == "push_outage"],
     [for workflow in datadog_workflow_automation.redrive : {
       definition = {
         type        = "run_workflow"
         workflow_id = workflow.id
-        title       = "Redrive Undelivered Notifications"
-        description = "Business effect: every unresolved notification is sent again; notification IDs make the push idempotent, so no customer is notified twice. Run after Reset to Baseline has recovered the push provider. Observe: Unresolved notification dead letters returns to zero and Notifications delivered rises."
+        title       = "未達通知の再送 (Redrive)"
+        description = "業務影響: 未解決の通知をすべて再送します。通知 ID によりプッシュは冪等なため、同じお客様に二重に通知されることはありません。**ベースラインに戻す** でプッシュ通知事業者が復旧してから実行してください。確認先: 未解決の通知デッドレターがゼロに戻り、配信済み通知が増加します。"
       }
     }],
   )
@@ -88,7 +88,7 @@ locals {
   cli_control_widgets = [{
     definition = {
       type             = "note"
-      content          = "## Operator Controls use the CLI in this deployment\nWorkflow Automation is disabled. From the repository, run `scripts/demo-control <kind|eks> <action>` with one of: `baseline`, `stop`, `opening-rush`, `sell-off`, `buying-power-delay`, `push-outage`, or `redrive`. The script verifies the Kubernetes context and reaches ClusterIP-only endpoints through a temporary port-forward. Return to **Demo Overview** or **Data Streams Monitoring** after each action; changes can take tens of seconds to appear. To add buttons here, follow `docs/private-action-runner.md` and set `enable_workflows = true`."
+      content          = "## この環境ではデモ操作に CLI を使用します\nWorkflow Automation は無効です。リポジトリで `scripts/demo-control <kind|eks> <action>` を実行し、action には `baseline`、`stop`、`opening-rush`、`sell-off`、`buying-power-delay`、`push-outage`、`redrive` のいずれかを指定します。スクリプトは Kubernetes コンテキストを確認したうえで、一時的な port-forward 経由で ClusterIP のみのエンドポイントにアクセスします。各操作後は **デモ概要** タブまたは **Data Streams Monitoring** に戻ってください。反映まで数十秒かかることがあります。ここにボタンを追加するには `docs/private-action-runner.md` の手順で Private Action Runner を設定し、`enable_workflows = true` を指定してください。"
       background_color = "blue"
       font_size        = "16"
       text_align       = "left"
@@ -106,7 +106,7 @@ locals {
   demo_overview_intro_widget = {
     definition = {
       type             = "note"
-      content          = "## Online brokerage order flow observability\nRead top-to-bottom: detect customer impact (rejected orders, late buying power (買付余力), undelivered notifications), find the affected orders and accounts, then diagnose the responsible stream or service. Customer orders reserve buying power synchronously; executions fan out over Kafka to buying power, holdings, trade reports, notifications, and order inquiry. Widgets labelled **now** are current-state gauges; the others count events in the selected window. Symbols D101–D105, accounts, prices, and amounts (JPY, 円) are fictional. [Open Data Streams Monitoring](${var.datadog_ui_base_url}/data-streams)."
+      content          = "## ネット証券 注文フローのオブザーバビリティ\n上から順に、お客様への影響（注文の拒否、買付余力の反映遅れ、通知の未達）を検知し、影響を受けた注文・口座を特定し、原因となるストリームやサービスを診断します。お客様の注文は受付時に買付余力を同期的に拘束します。約定は Kafka 経由で買付余力・保有残高・取引報告書・通知・注文照会へファンアウトされます。タイトルに **現在** とあるウィジェットは現時点の状態、それ以外は選択期間内のイベント件数です。銘柄 D101–D105、口座、価格、金額（円）はすべて架空です。[Data Streams Monitoring を開く](${var.datadog_ui_base_url}/data-streams)"
       background_color = "blue"
       font_size        = "16"
       text_align       = "left"
@@ -118,7 +118,7 @@ locals {
     {
       definition = {
         type  = "query_value"
-        title = "Orders accepted · selected window"
+        title = "受付注文 · 選択期間"
         requests = [{
           q          = "sum:demo.brokerage.orders.accepted{env:$env.value}.as_count()"
           aggregator = "sum"
@@ -130,8 +130,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Orders rejected · selected window"
-        description = "Orders rejected synchronously at intake, for example for insufficient buying power or sellable quantity. Rejected orders never reach the exchange."
+        title       = "拒否注文 · 選択期間"
+        description = "受付時に同期的に拒否された注文（買付余力不足、売付可能数量不足など）。拒否された注文は取引所に送られません。"
         requests = [{
           q          = "sum:demo.brokerage.orders.rejected{env:$env.value}.as_count()"
           aggregator = "sum"
@@ -147,7 +147,7 @@ locals {
     {
       definition = {
         type  = "toplist"
-        title = "Rejects by reason · selected window"
+        title = "拒否理由別 · 選択期間"
         requests = [{
           q = "top(sum:demo.brokerage.orders.rejected{env:$env.value} by {reason}.as_count(), 5, 'sum', 'desc')"
           conditional_formats = [
@@ -159,8 +159,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Executions (約定) · selected window"
-        description = "Fills reported by the exchange, counting each partial fill separately."
+        title       = "約定件数 · 選択期間"
+        description = "取引所から通知された約定。一部約定も 1 件ずつ数えます。"
         requests = [{
           q          = "sum:demo.brokerage.executions.count{env:$env.value}.as_count()"
           aggregator = "sum"
@@ -172,8 +172,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Executed amount (約定代金) · 百万円"
-        description = "Gross BUY and SELL executed amount during the selected window, not netted, in millions of fictional yen (百万円). Commission is zero."
+        title       = "約定代金 · 百万円"
+        description = "選択期間内の買付・売付の約定代金の総額（相殺なし）。単位は架空の百万円で、手数料はゼロです。"
         requests = [{
           q          = "sum:demo.brokerage.executions.amount_jpy{env:$env.value} / 1000000"
           aggregator = "sum"
@@ -186,8 +186,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Working orders · now"
-        description = "Accepted orders that are not yet fully filled or expired."
+        title       = "未約定注文 · 現在"
+        description = "受付済みで、まだ全部約定も失効もしていない注文。"
         requests = [{
           q          = "sum:demo.brokerage.orders.working{env:$env.value}"
           aggregator = "last"
@@ -203,8 +203,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Unfilled SELL quantity · now"
-        description = "Shares still open on working SELL orders. Rises sharply when a sell-off pushes a symbol to limit-down (ストップ安) and buyers disappear."
+        title       = "売り未約定数量 · 現在"
+        description = "未約定の売り注文に残っている株数。売り殺到で銘柄がストップ安になり買い手がいなくなると急増します。"
         requests = [{
           q          = "sum:demo.brokerage.orders.unfilled_quantity{env:$env.value,side:sell}"
           aggregator = "last"
@@ -217,8 +217,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Current scenario · now"
-        description = "Scenario currently driven by order-flow-simulator: -1 = stopped, 0 = baseline, 1 = opening rush (寄付き集中), 2 = news-driven sell-off (材料による売り殺到)."
+        title       = "実行中のシナリオ · 現在"
+        description = "order-flow-simulator が実行中のシナリオ: -1 = 停止、0 = ベースライン、1 = 寄付き集中、2 = 材料による売り殺到。"
         requests = [{
           q          = "max:demo.brokerage.scenario.current{env:$env.value}"
           aggregator = "last"
@@ -235,8 +235,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Unreflected buying-power executions · now"
-        description = "Executions confirmed by the exchange whose effect is not yet reflected in buying power (買付余力)."
+        title       = "買付余力 未反映約定 · 現在"
+        description = "取引所で約定済みだが、まだ買付余力に反映されていない約定。"
         requests = [{
           q          = "sum:demo.brokerage.buying_power.unreflected_executions{env:$env.value}"
           aggregator = "last"
@@ -252,8 +252,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Oldest unreflected execution · now"
-        description = "Age of the oldest execution not yet reflected in buying power. While it grows, sale proceeds cannot fund new BUY orders."
+        title       = "最古の未反映約定 · 現在"
+        description = "買付余力に未反映の約定のうち、最も古いものの経過時間（秒）。増加している間は売却代金を新たな買付に充てられません。"
         requests = [{
           q          = "max:demo.brokerage.buying_power.oldest_unreflected_age{env:$env.value}"
           aggregator = "last"
@@ -269,8 +269,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Buying-power reflection delay · p95"
-        description = "95th-percentile time from execution to buying-power reflection in the selected window."
+        title       = "買付余力 反映遅延 · p95"
+        description = "選択期間における、約定から買付余力に反映されるまでの時間の 95 パーセンタイル（ms）。"
         requests = [{
           q          = "p95:demo.brokerage.buying_power.reflection_delay{env:$env.value}"
           aggregator = "last"
@@ -286,8 +286,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Notification delivery delay · p95"
-        description = "95th-percentile time from execution or expiry to push delivery, including retries."
+        title       = "通知 配信遅延 · p95"
+        description = "約定または失効からプッシュ配信までの時間の 95 パーセンタイル（再試行を含む、ms）。"
         requests = [{
           q          = "p95:demo.brokerage.notifications.delivery_delay{env:$env.value}"
           aggregator = "last"
@@ -303,8 +303,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Unresolved notification dead letters · now"
-        description = "Customer notifications that exhausted retries and wait in exception-management-service for redrive."
+        title       = "未解決の通知デッドレター · 現在"
+        description = "再試行を使い切り、exception-management-service で再送 (Redrive) を待っているお客様向け通知。"
         requests = [{
           q          = "sum:demo.brokerage.notifications.dead_letter.unresolved{env:$env.value}"
           aggregator = "last"
@@ -320,8 +320,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "Oldest unresolved notification dead letter · now"
-        description = "Residence time of the oldest undelivered notification since it reached the DLT."
+        title       = "最古の未解決通知デッドレター · 現在"
+        description = "未配信の通知のうち、DLT に入ってからの滞留時間が最も長いもの（秒）。"
         requests = [{
           q          = "max:demo.brokerage.notifications.dead_letter.oldest_unresolved_age{env:$env.value}"
           aggregator = "last"
@@ -340,7 +340,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Order flow · accepted, executions, expired, rejected"
+        title       = "注文フロー · 受付・約定・失効・拒否"
         show_legend = true
         requests = [
           { q = "sum:demo.brokerage.orders.accepted{env:$env.value}.as_count()", display_type = "bars", style = { palette = "cool", line_type = "solid", line_width = "normal" } },
@@ -353,8 +353,8 @@ locals {
     {
       definition = {
         type        = "sunburst"
-        title       = "Accepted orders · side and symbol"
-        description = "Inner ring: BUY/SELL. Outer ring: fictional symbol within each side. Values are accepted order counts for the selected time window."
+        title       = "受付注文 · 売買区分と銘柄"
+        description = "内側: 買い / 売り。外側: 売買区分ごとの架空銘柄。値は選択期間内の受付注文件数です。"
         hide_total  = false
         legend = {
           type         = "automatic"
@@ -377,8 +377,8 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Executions · partial versus final fill"
-        description = "An order can fill in several parts (分割約定). The final fill completes the order."
+        title       = "約定 · 一部約定と全部約定"
+        description = "1 つの注文が複数回に分かれて約定（一部約定）することがあります。最後の約定で注文が完了します。"
         show_legend = true
         requests = [{
           q            = "sum:demo.brokerage.executions.count{env:$env.value} by {fill_type}.as_count()"
@@ -390,7 +390,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Executed amount (約定代金) · symbol and side"
+        title       = "約定代金 · 銘柄と売買区分"
         show_legend = true
         requests = [{
           q            = "sum:demo.brokerage.executions.amount_jpy{env:$env.value} by {symbol,side}"
@@ -402,7 +402,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Market price · symbol (change % on right axis)"
+        title       = "株価 · 銘柄別（右軸: 騰落率 %）"
         show_legend = true
         requests = [
           { q = "avg:demo.brokerage.market.price{env:$env.value} by {symbol}", display_type = "line", style = { palette = "cool", line_type = "solid", line_width = "thick" } },
@@ -413,8 +413,8 @@ locals {
     {
       definition = {
         type        = "query_table"
-        title       = "Market snapshot · price, change %, and limit-down (ストップ安) flag"
-        description = "Latest fictional quote per symbol. A limit-down flag of 1 means the price reached the lower daily limit and sell orders can no longer fill."
+        title       = "銘柄スナップショット · 現在値・騰落率・ストップ安フラグ"
+        description = "銘柄ごとの最新の架空株価。ストップ安フラグが 1 の場合、株価が値幅制限の下限に達しており、売り注文は約定できません。"
         requests = [{
           response_format = "scalar"
           queries = [
@@ -423,10 +423,10 @@ locals {
             { data_source = "metrics", name = "limit_down", query = "max:demo.brokerage.market.limit_down{env:$env.value} by {symbol}", aggregator = "last" },
           ]
           formulas = [
-            { formula = "price", alias = "Last price (円)" },
+            { formula = "price", alias = "現在値 (円)" },
             {
               formula = "change"
-              alias   = "Change %"
+              alias   = "騰落率 %"
               conditional_formats = [
                 { comparator = "<=", value = -10, palette = "white_on_red" },
                 { comparator = "<", value = 0, palette = "white_on_yellow" },
@@ -435,7 +435,7 @@ locals {
             },
             {
               formula = "limit_down"
-              alias   = "Limit-down"
+              alias   = "ストップ安"
               conditional_formats = [
                 { comparator = ">=", value = 1, palette = "white_on_red" },
                 { comparator = "<", value = 1, palette = "white_on_green" },
@@ -448,8 +448,8 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Working orders and unfilled quantity · symbol and side (now)"
-        description = "Lines: working order count. Dashed, right axis: unfilled shares."
+        title       = "未約定注文と未約定数量 · 銘柄と売買区分（現在）"
+        description = "実線: 未約定注文の件数。破線・右軸: 未約定株数。"
         show_legend = true
         requests = [
           { q = "sum:demo.brokerage.orders.working{env:$env.value} by {symbol,side}", display_type = "line", style = { palette = "cool", line_type = "solid", line_width = "thick" } },
@@ -460,8 +460,8 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Order to first execution · p50 / p95 / p99"
-        description = "Orders held for the opening auction (板寄せ) wait for the auction, so p95 and p99 jump during an opening rush."
+        title       = "発注から初回約定まで · p50 / p95 / p99"
+        description = "寄付きの板寄せを待つ注文は板寄せまで約定しないため、寄付き集中時に p95 と p99 が跳ね上がります。"
         show_legend = true
         requests = [
           { q = "p50:demo.brokerage.order_to_first_execution.duration{env:$env.value}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "normal" } },
@@ -473,8 +473,8 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Rejects by reason and switch-trade results"
-        description = "Bars: rejects by reason. Thick red line: INSUFFICIENT_BUYING_POWER, the 「売ったのに買えない」 symptom. Dashed, right axis: switch trades (sell, then buy with the proceeds) by result."
+        title       = "拒否理由別と乗り換え取引の結果"
+        description = "棒: 拒否理由別の件数。赤の太線: INSUFFICIENT_BUYING_POWER（「売ったのに買えない」症状）。破線・右軸: 乗り換え取引（売却し、その代金で買付）の結果別件数。"
         show_legend = true
         requests = [
           { q = "sum:demo.brokerage.orders.rejected{env:$env.value} by {reason}.as_count()", display_type = "bars", style = { palette = "orange", line_type = "solid", line_width = "normal" } },
@@ -486,8 +486,8 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Buying-power reflection delay · p50 / p95 / p99 and unreflected executions"
-        description = "Dashed, right axis: executions not yet reflected in buying power (now)."
+        title       = "買付余力 反映遅延 · p50 / p95 / p99 と未反映約定"
+        description = "破線・右軸: 買付余力に未反映の約定件数（現在）。"
         show_legend = true
         requests = [
           { q = "p50:demo.brokerage.buying_power.reflection_delay{env:$env.value}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "normal" } },
@@ -500,8 +500,8 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Notifications · delivered, retried, and dead-lettered"
-        description = "Dashed, right axis: notification delivery delay p95."
+        title       = "通知 · 配信・再試行・デッドレター"
+        description = "破線・右軸: 通知配信遅延 p95。"
         show_legend = true
         requests = [
           { q = "sum:demo.brokerage.notifications.delivered{env:$env.value} by {notification_type}.as_count()", display_type = "bars", style = { palette = "green", line_type = "solid", line_width = "normal" } },
@@ -514,8 +514,8 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Push gateway · requests by result"
-        description = "Responses from the fictional external push provider. A provider outage shows up here first."
+        title       = "プッシュゲートウェイ · 結果別リクエスト"
+        description = "架空の外部プッシュ通知事業者からの応答。事業者の障害はまずここに現れます。"
         show_legend = true
         requests = [{
           q            = "sum:demo.brokerage.push_gateway.requests{env:$env.value} by {result}.as_count()"
@@ -530,7 +530,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "DSM · pathway latency p95"
+        title       = "DSM · Pathway レイテンシー p95"
         show_legend = true
         requests = [{
           q            = "p95:data_streams.latency{env:$env.value} by {pathway_type,start,end}"
@@ -542,7 +542,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "DSM · Kafka consumer lag"
+        title       = "DSM · Kafka Consumer lag"
         show_legend = true
         requests = [
           { q = "max:data_streams.kafka.lag_seconds{env:$env.value} by {topic,consumer_group}", display_type = "line", style = { palette = "warm", line_type = "solid", line_width = "thick" } },
@@ -553,8 +553,8 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "DSM · execution fan-out lag on brokerage.executions.v1"
-        description = "One line per consumer group. During an opening rush every group lags together; a buying-power delay makes only buying-power-service-v1 fall behind."
+        title       = "DSM · 約定ファンアウトの lag · brokerage.executions.v1"
+        description = "コンシューマグループごとに 1 本の線。寄付き集中では全グループが一斉に遅れ、買付余力の反映遅延では buying-power-service-v1 だけが遅れます。"
         show_legend = true
         requests = [{
           q            = "max:data_streams.kafka.lag_messages{env:$env.value,topic:brokerage.executions.v1} by {consumer_group}"
@@ -566,8 +566,8 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "APM · synchronous order intake (order-service → buying-power-service)"
-        description = "Bars: HTTP request errors. Lines, right axis: p95 latency. Buying power is reserved in-line before an order is accepted."
+        title       = "APM · 同期の注文受付（order-service → buying-power-service）"
+        description = "棒: HTTP リクエストエラー。線・右軸: p95 レイテンシー。買付余力は注文受付の前に同期処理で拘束されます。"
         show_legend = true
         requests = [
           { q = "sum:trace.servlet.request.errors{env:$env.value,service:order-service} by {service}.as_count()", display_type = "bars", style = { palette = "warm", line_type = "solid", line_width = "normal" } },
@@ -580,7 +580,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "APM · Kafka consumer errors and latency"
+        title       = "APM · Kafka コンシューマのエラーとレイテンシー"
         show_legend = true
         requests = [
           { q = "sum:trace.kafka.consume.errors{env:$env.value} by {service}.as_count()", display_type = "bars", style = { palette = "warm", line_type = "solid", line_width = "normal" } },
@@ -591,7 +591,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Kafka clients · producer errors, retries, and request latency"
+        title       = "Kafka クライアント · プロデューサのエラー・リトライ・リクエストレイテンシー"
         show_legend = true
         requests = [
           { q = "sum:kafka.producer.record.error.rate{env:$env.value} by {service}", display_type = "bars", style = { palette = "warm", line_type = "solid", line_width = "normal" } },
@@ -606,7 +606,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Kafka brokers on Kubernetes · readiness and restarts"
+        title       = "Kubernetes 上の Kafka ブローカー · Ready 状態と再起動"
         show_legend = true
         requests = [
           { q = "sum:kubernetes_state.container.ready{kube_namespace:brokerage-demo,kube_app_name:kafka} by {pod_name}", display_type = "line", style = { palette = "green", line_type = "solid", line_width = "thick" } },
@@ -617,7 +617,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Kafka brokers on Kubernetes · CPU and memory"
+        title       = "Kubernetes 上の Kafka ブローカー · CPU とメモリ"
         show_legend = true
         requests = [
           { q = "avg:kubernetes.cpu.usage.total{kube_namespace:brokerage-demo,kube_app_name:kafka} by {pod_name}", display_type = "line", style = { palette = "cool", line_type = "solid", line_width = "normal" } },
@@ -628,7 +628,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Application deployments · desired versus ready replicas"
+        title       = "アプリケーション Deployment · 希望レプリカ数と Ready レプリカ数"
         show_legend = true
         requests = [
           { q = "max:kubernetes_state.deployment.replicas_desired{env:$env.value,kube_namespace:brokerage-demo} by {kube_deployment}", display_type = "line", style = { palette = "cool", line_type = "dashed", line_width = "normal" } },
@@ -639,7 +639,7 @@ locals {
     {
       definition = {
         type        = "timeseries"
-        title       = "Application containers · restarts"
+        title       = "アプリケーションコンテナ · 再起動"
         show_legend = true
         requests = [{
           q            = "max:kubernetes.containers.restarts{env:$env.value,kube_namespace:brokerage-demo} by {kube_deployment,pod_name}"
@@ -654,7 +654,7 @@ locals {
     {
       definition = {
         type             = "note"
-        content          = "### From aggregate impact to one order\nAll lists below follow the dashboard Time Picker and the **order_id** and **account_id** variables. Leave both as `*` to find affected orders, then select one account to see every order it placed, or one order to follow it from intake through execution, buying power, trade report, and notification. Gauges marked **now** are current state, so widen the Time Picker when investigating an older unresolved dead letter."
+        content          = "### 全体の影響から個別の注文へ\n以下のリストはすべて、ダッシュボードのタイムピッカーと **order_id**・**account_id** 変数に連動します。両方を `*` のままにすると影響を受けた注文を探せます。口座を 1 つ選ぶとその口座の全注文を、注文を 1 つ選ぶと受付から約定・買付余力・取引報告書・通知までの流れを追跡できます。**現在** と表示されたゲージは現時点の状態を示すため、古い未解決デッドレターを調べる場合はタイムピッカーの期間を広げてください。"
         background_color = "gray"
         font_size        = "14"
         text_align       = "left"
@@ -664,7 +664,7 @@ locals {
     {
       definition = {
         type        = "list_stream"
-        title       = "Rejected orders · not accepted in selected window"
+        title       = "拒否注文 · 選択期間内に受け付けられなかった注文"
         title_size  = "16"
         title_align = "left"
         requests = [{
@@ -697,7 +697,7 @@ locals {
     {
       definition = {
         type        = "list_stream"
-        title       = "Expired orders · unfilled quantity released in selected window"
+        title       = "失効注文 · 選択期間内に未約定数量が失効した注文"
         title_size  = "16"
         title_align = "left"
         requests = [{
@@ -730,7 +730,7 @@ locals {
     {
       definition = {
         type        = "list_stream"
-        title       = "Notification dead letters · customers not yet notified"
+        title       = "通知デッドレター · まだ通知が届いていないお客様"
         title_size  = "16"
         title_align = "left"
         requests = [{
@@ -763,7 +763,7 @@ locals {
     {
       definition = {
         type        = "list_stream"
-        title       = "Order lifecycle transactions · click one order to inspect every observed stage"
+        title       = "注文ライフサイクル · 注文をクリックすると全ステージを確認できます"
         title_size  = "16"
         title_align = "left"
         requests = [{
@@ -908,7 +908,7 @@ locals {
     {
       definition = {
         type             = "group"
-        title            = "1 · Executive Summary · customer impact at a glance"
+        title            = "1 · エグゼクティブサマリー · お客様への影響を一目で把握"
         layout_type      = "ordered"
         show_title       = true
         background_color = "transparent"
@@ -918,7 +918,7 @@ locals {
     {
       definition = {
         type             = "group"
-        title            = "2 · Business Flow & Market · orders, executions, prices, buying power, and notifications"
+        title            = "2 · 業務フローと市況 · 注文・約定・株価・買付余力・通知"
         layout_type      = "ordered"
         show_title       = true
         background_color = "transparent"
@@ -928,7 +928,7 @@ locals {
     {
       definition = {
         type             = "group"
-        title            = "3 · Orders Requiring Attention · open one order or account and inspect its lifecycle"
+        title            = "3 · 要対応の注文 · 注文または口座を選んでライフサイクルを確認"
         layout_type      = "ordered"
         show_title       = true
         background_color = "transparent"
@@ -938,7 +938,7 @@ locals {
     {
       definition = {
         type             = "group"
-        title            = "4 · Streaming & Application Diagnosis · DSM, Kafka clients, and APM"
+        title            = "4 · ストリーミングとアプリケーションの診断 · DSM・Kafka クライアント・APM"
         layout_type      = "ordered"
         show_title       = true
         background_color = "transparent"
@@ -948,7 +948,7 @@ locals {
     {
       definition = {
         type             = "group"
-        title            = "5 · Kafka & Kubernetes Runtime · supporting diagnosis"
+        title            = "5 · Kafka と Kubernetes のランタイム · 補助的な診断"
         layout_type      = "ordered"
         show_title       = true
         background_color = "transparent"
@@ -993,12 +993,12 @@ locals {
   dashboard_tabs = [
     {
       id         = "614099eb-6e19-4f93-a2db-45eb0bf48d3d"
-      name       = "Demo Overview"
+      name       = "デモ概要"
       widget_ids = local.demo_overview_tab_widget_ids
     },
     {
       id         = "1f40d12a-f88f-49e2-b04e-f90fe96daf50"
-      name       = "Operator Controls"
+      name       = "デモ操作"
       widget_ids = [for index in range(local.demo_control_widget_count) : "@${index + 1}"]
     },
   ]
@@ -1006,8 +1006,8 @@ locals {
 
 resource "datadog_dashboard_json" "brokerage_demo" {
   dashboard = jsonencode({
-    title       = "Online Brokerage Order Flow · Datadog Data Streams Monitoring Demo"
-    description = var.enable_workflows ? "Fictional online-brokerage (ネット証券) cash-equity order flow. Detect customer impact, drill down to one order or account, diagnose the responsible stream or service, and verify recovery in one Demo Overview; scenario workflows remain on a separate Operator Controls tab." : "Fictional online-brokerage (ネット証券) cash-equity order flow. Detect customer impact, drill down to one order or account, diagnose the responsible stream or service, and verify recovery in one Demo Overview; the Operator Controls tab explains the CLI fallback."
+    title       = "ネット証券 注文フロー · Datadog Data Streams Monitoring デモ"
+    description = var.enable_workflows ? "架空のネット証券における現物株式の注文フロー。お客様への影響の検知、個別の注文・口座へのドリルダウン、原因となるストリームやサービスの診断、復旧の確認を「デモ概要」タブで行います。シナリオ実行用の Workflow は「デモ操作」タブにあります。" : "架空のネット証券における現物株式の注文フロー。お客様への影響の検知、個別の注文・口座へのドリルダウン、原因となるストリームやサービスの診断、復旧の確認を「デモ概要」タブで行います。「デモ操作」タブでは CLI による代替手順を説明しています。"
     layout_type = "ordered"
     reflow_type = "fixed"
     notify_list = null
