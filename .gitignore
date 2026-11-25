@@ -5,6 +5,7 @@ AGENTS.md
 **/target/
 **/node_modules/
 .m2/
+__pycache__/
 infra/aws-cdk/cdk.out/
 infra/aws-cdk/.cdk.staging/
 infra/aws-cdk/cdk.context.json

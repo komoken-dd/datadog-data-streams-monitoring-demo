@@ -12,4 +12,7 @@ reclaimPolicy: Delete
 parameters:
   type: gp3
   encrypted: "true"
+  {{- range $index, $key := keys .Values.storageClass.volumeTags | sortAlpha }}
+  tagSpecification_{{ add1 $index }}: {{ printf "%s=%s" $key (get $.Values.storageClass.volumeTags $key) | quote }}
+  {{- end }}
 {{- end }}
