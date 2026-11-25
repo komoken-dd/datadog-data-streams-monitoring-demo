@@ -198,10 +198,12 @@ function additionalTags(value: string | undefined): Record<string, string> {
   const tags: Record<string, string> = {};
   for (const pair of (value ?? "").split(",").map((item) => item.trim()).filter(Boolean)) {
     const separator = pair.indexOf("=");
-    if (separator <= 0 || separator === pair.length - 1) {
+    const key = pair.slice(0, separator).trim();
+    const tagValue = pair.slice(separator + 1).trim();
+    if (separator < 0 || !key || !tagValue) {
       throw new Error(`BROKERAGE_DEMO_RESOURCE_TAGS entries must be key=value: ${pair}`);
     }
-    tags[pair.slice(0, separator).trim()] = pair.slice(separator + 1).trim();
+    tags[key] = tagValue;
   }
   return tags;
 }

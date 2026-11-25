@@ -201,6 +201,20 @@ The CDK stack requires:
 | `BROKERAGE_DEMO_ADMIN_ROLE_ARN` | IAM role granted EKS cluster-admin access |
 | `BROKERAGE_DEMO_NODE_INSTANCE_TYPE` | Optional worker type; defaults to `m8g.xlarge`. CDK selects the matching x86_64 or ARM64 EKS AMI automatically. |
 | `BROKERAGE_DEMO_AWS_REGION` | Optional AWS region; defaults to `us-west-2` |
+| `BROKERAGE_DEMO_RESOURCE_TAGS` | Optional comma-separated `key=value` tags for CDK resources and newly provisioned EBS volumes. Use the same value for infrastructure creation and application deployment. |
+
+Supply any tags required by your AWS account through
+`BROKERAGE_DEMO_RESOURCE_TAGS` in the command environment. Tag keys and values
+must be nonempty after trimming surrounding whitespace; spaces within values
+are preserved. Dots, slashes, and colons in keys remain literal. Empty
+comma-separated entries are ignored, additional `=` characters belong to the
+value, and the last occurrence of a duplicate key wins. Commas within a key or
+value are not supported. The `project` tag on CDK resources is reserved by the
+demo. Keep account-specific tag values outside committed configuration.
+
+Adding or changing CDK tags on an existing stack can affect EKS custom
+resources and node launch templates. Review `cdk diff` for replacements and
+do not deploy a replacement over a running cluster without a migration plan.
 
 ```bash
 cd infra/aws-cdk
@@ -337,6 +351,101 @@ that all application images match the selected references and that every
 runtime image includes a digest.
 
 After deployment, filter Data Streams Monitoring to `env:demo`.
+
+### Changing EBS volume tags on an existing environment
+
+Before making any persisted Kubernetes or Helm changes, `scripts/deploy eks`
+renders the StorageClass with the same values used by the application upgrade
+and submits a server-side dry run. A new or unchanged StorageClass passes.
+If validation or permissions fail, the script stops before installing
+operators or changing Secrets. Kubernetes rejects changes to the parameters
+of an existing StorageClass, including adding, changing, or removing volume
+tags. The script never deletes or replaces storage resources automatically.
+
+For an existing `gp3` StorageClass whose tags need changing, schedule a
+maintenance window for storage provisioning and use this deliberate migration:
+
+1. Confirm the expected AWS account and Kubernetes context. Verify that all
+   relevant PVCs are bound, pause new volume provisioning, and take or verify
+   backups of any Kafka and PostgreSQL data you need to retain.
+2. Save the existing StorageClass, PVCs, and PVs outside the repository. The
+   sanitized StorageClass backup below can be used to restore its configuration
+   if creating the replacement fails.
+
+   ```bash
+   migration_dir="$(mktemp -d)"
+   kubectl --context "${BROKERAGE_DEMO_EKS_CONTEXT}" get storageclass gp3 -o json \
+     | jq 'del(.metadata.uid, .metadata.resourceVersion,
+               .metadata.creationTimestamp, .metadata.managedFields,
+               .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"])' \
+     > "${migration_dir}/gp3-backup.json"
+   kubectl --context "${BROKERAGE_DEMO_EKS_CONTEXT}" get pvc -A -o yaml \
+     > "${migration_dir}/pvc-backup.yaml"
+   kubectl --context "${BROKERAGE_DEMO_EKS_CONTEXT}" get pv -o yaml \
+     > "${migration_dir}/pv-backup.yaml"
+   ```
+
+3. With the intended `BROKERAGE_DEMO_RESOURCE_TAGS` exported, render the proposed
+   StorageClass locally. Set `application_image_values` to the self-built
+   image values or verified release image lock selected in section 5.
+
+   ```bash
+   scripts/resource-tag-values > "${migration_dir}/resource-tags.json"
+   helm template brokerage-demo deploy/helm/brokerage-demo \
+     --namespace "${BROKERAGE_NAMESPACE:-brokerage-demo}" \
+     --values deploy/values/values-eks.yaml \
+     --values "${application_image_values}" \
+     --values "${migration_dir}/resource-tags.json" \
+     --show-only templates/storage-class.yaml \
+     > "${migration_dir}/gp3-rendered.yaml"
+   kubectl annotate --local --overwrite \
+     --filename "${migration_dir}/gp3-rendered.yaml" \
+     meta.helm.sh/release-name=brokerage-demo \
+     "meta.helm.sh/release-namespace=${BROKERAGE_NAMESPACE:-brokerage-demo}" \
+     --output yaml > "${migration_dir}/gp3-replacement.yaml"
+   ```
+
+4. Compare the backup with the replacement. Preserve the existing name,
+   provisioner, binding mode, reclaim policy, encryption, volume type, and any
+   additional metadata; change only the intended tag parameters. Retain the
+   Helm ownership annotations and `app.kubernetes.io/managed-by: Helm` label
+   so the next Helm upgrade can manage the replacement.
+5. After reviewing the backup and replacement, replace **only the
+   StorageClass object** with the same name. Existing bound PVCs, PVs, and EBS
+   volumes remain in place. Do not delete them or uninstall the Helm release.
+
+   ```bash
+   kubectl --context "${BROKERAGE_DEMO_EKS_CONTEXT}" delete storageclass gp3
+   kubectl --context "${BROKERAGE_DEMO_EKS_CONTEXT}" create \
+     --filename "${migration_dir}/gp3-replacement.yaml"
+   ```
+
+   If replacement creation fails, restore the saved StorageClass with
+   `kubectl --context "${BROKERAGE_DEMO_EKS_CONTEXT}" create --filename "${migration_dir}/gp3-backup.json"`
+   before resuming provisioning.
+6. Rerun the deployment with the same tag environment and image selection.
+   Confirm that the preflight passes, existing PVCs remain bound to the same
+   volumes, and application health checks pass before resuming provisioning.
+
+StorageClass tags apply only to EBS volumes provisioned afterward. Apply the
+required tags separately to existing EBS volumes with the AWS CLI, selecting
+volume IDs from the PVs' `spec.csi.volumeHandle`, and verify the tags on every
+actual volume. This migration does not retag existing volumes or migrate CDK
+resources. See the Kubernetes [StorageClass update validation](https://github.com/kubernetes/kubernetes/blob/v1.36.0/pkg/apis/storage/validation/validation.go#L55-L63)
+and [server-side dry-run option](https://kubernetes.io/docs/reference/kubectl/generated/kubectl_apply/)
+for the underlying behavior.
+
+The local regression suite uses real Helm rendering, local kubectl manifest
+processing, and mocked AWS, Datadog, and Kubernetes service calls. It requires
+Python 3, jq, Helm, and kubectl; the CDK tests use the Node.js dependencies
+installed in section 4. These tests make no changes to an existing cluster:
+
+```bash
+python3 -m unittest discover -s tests -v
+npm --prefix infra/aws-cdk run build
+npm --prefix infra/aws-cdk test
+bash -n scripts/deploy scripts/resource-tag-values
+```
 
 ## 8. Create Datadog resources
 

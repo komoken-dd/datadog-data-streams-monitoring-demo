@@ -39,6 +39,11 @@ cleanup_image_work_dir() {
 }
 trap cleanup_image_work_dir EXIT
 
+# Parse before any network calls or cluster changes. JSON preserves literal
+# tag keys and spaces within values, unlike Helm --set-string paths.
+resource_tag_values="${image_work_dir}/resource-tags.json"
+bash "${PROJECT_ROOT}/scripts/resource-tag-values" >"${resource_tag_values}"
+
 if [[ "${BROKERAGE_DEMO_IMAGE_SOURCE}" == "release" ]]; then
   require_nonempty BROKERAGE_DEMO_RELEASE
   application_image_values="${image_work_dir}/brokerage-demo-images-${BROKERAGE_DEMO_RELEASE}.json"
@@ -65,6 +70,26 @@ echo "Datadog Kubernetes Secret: ${datadog_secret_name}"
 echo "DSM full topology: ${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}"
 
 require_datadog_credentials
+
+application_chart="${PROJECT_ROOT}/deploy/helm/brokerage-demo"
+application_helm_args=(
+  --namespace "${BROKERAGE_NAMESPACE}"
+  --values "${PROJECT_ROOT}/deploy/values/values-eks.yaml"
+  --values "${application_image_values}"
+  --values "${resource_tag_values}"
+  --set-string "datadog.site=${DD_SITE}"
+  --set-string "datadog.secretName=${datadog_secret_name}"
+  --set-string "datadog.dsm.orderStateServiceEnabled=${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}"
+)
+
+# StorageClass parameters cannot be updated. Validate the exact manifest before
+# installing operators, writing Secrets, or making any other persisted changes.
+storage_class_manifest="${image_work_dir}/storage-class.yaml"
+helm template brokerage-demo "${application_chart}" "${application_helm_args[@]}" \
+  --show-only templates/storage-class.yaml >"${storage_class_manifest}"
+if ! kubectl apply --dry-run=server --filename "${storage_class_manifest}" >/dev/null; then
+  die "StorageClass preflight failed; no deployment changes were made. Existing StorageClass parameters are immutable. See docs/demo-runbook.md#changing-ebs-volume-tags-on-an-existing-environment for migration; resolve any other validation or access error before retrying."
+fi
 
 kubectl create namespace strimzi-system --dry-run=client -o yaml | kubectl apply -f -
 helm upgrade --install strimzi-kafka-operator \
@@ -113,26 +138,8 @@ else
     --dry-run=client -o yaml | kubectl apply -f -
 fi
 
-# The same key=value pairs used for the CDK stack tag the EBS volumes created
-# for Kafka and PostgreSQL, which do not inherit the stack tags.
-volume_tag_args=()
-IFS=',' read -r -a resource_tags <<<"${BROKERAGE_DEMO_RESOURCE_TAGS:-}"
-for pair in "${resource_tags[@]:-}"; do
-  pair="${pair// /}"
-  [[ -z "${pair}" ]] && continue
-  [[ "${pair}" =~ ^[A-Za-z0-9_.:/@+-]+=[A-Za-z0-9_.:/@+-]+$ ]] \
-    || die "BROKERAGE_DEMO_RESOURCE_TAGS entries must be key=value: ${pair}"
-  volume_tag_args+=(--set-string "storageClass.volumeTags.${pair}")
-done
-
-helm upgrade --install brokerage-demo "${PROJECT_ROOT}/deploy/helm/brokerage-demo" \
-  --namespace "${BROKERAGE_NAMESPACE}" \
-  --values "${PROJECT_ROOT}/deploy/values/values-eks.yaml" \
-  --values "${application_image_values}" \
-  --set-string "datadog.site=${DD_SITE}" \
-  --set-string "datadog.secretName=${datadog_secret_name}" \
-  --set-string "datadog.dsm.orderStateServiceEnabled=${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}" \
-  ${volume_tag_args[@]+"${volume_tag_args[@]}"} \
+helm upgrade --install brokerage-demo "${application_chart}" \
+  "${application_helm_args[@]}" \
   --wait \
   --timeout 15m
 

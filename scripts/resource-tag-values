@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# Keep tag keys literal: Helm --set interprets dots in keys as map separators.
+jq -n --arg tags "${BROKERAGE_DEMO_RESOURCE_TAGS:-}" '
+  def trim: gsub("^\\s+|\\s+$"; "");
+  reduce ($tags | split(",")[] | trim | select(length > 0)) as $pair
+    ({};
+      ($pair | index("=")) as $separator
+      | if $separator == null then
+          error("BROKERAGE_DEMO_RESOURCE_TAGS entries must be key=value: " + $pair)
+        else
+          ($pair[:$separator] | trim) as $key
+          | ($pair[$separator + 1:] | trim) as $value
+          | if $key == "" or $value == "" then
+              error("BROKERAGE_DEMO_RESOURCE_TAGS keys and values must not be blank")
+            else .[$key] = $value end
+        end)
+  | {storageClass: {volumeTags: .}}
+'
