@@ -210,6 +210,14 @@ https://docs.datadoghq.com/data_streams/schema_tracking/. This demo does not
 deploy a Schema Registry and remains functional when Schema Tracking is
 unavailable.
 
+## Security and upgrades
+
+Use the [security and migration guide](docs/security-and-migration.md) before
+upgrading an existing environment. Deployment now requires Python 3, enforces
+API credentials and network isolation, and separates runtime database roles
+from migration identities. A coordinated Kafka/database epoch is required for
+replay safety; the scripts do not reset existing data automatically.
+
 ## Support and license
 
 Questions and bug reports are accepted through GitHub Issues; pull requests

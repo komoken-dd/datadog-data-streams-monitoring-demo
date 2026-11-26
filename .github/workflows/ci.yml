@@ -1,0 +1,213 @@
+name: Validate demo
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  java:
+    name: Java, resolved dependencies, and runtime image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Podman
+        run: sudo apt-get update && sudo apt-get install --yes podman
+      - name: Build patched Java tools and verify all modules
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source config/container-images.sh
+          podman build --platform linux/amd64 --target java-build \
+            --build-arg BUILDARCH=amd64 \
+            --build-arg "MAVEN_IMAGE=${MAVEN_IMAGE_MULTIARCH}" \
+            --build-arg "JAVA_JDK_AMD64_SHA256=${JAVA_JDK_AMD64_SHA256}" \
+            --build-arg "JAVA_JDK_ARM64_SHA256=${JAVA_JDK_ARM64_SHA256}" \
+            --tag localhost/brokerage-java-build --file apps/Containerfile \
+            --ignorefile apps/.containerignore apps
+          # Private pod network: trust auth is restricted to this disposable CI
+          # database; no database port is published to the runner or Internet.
+          podman pod create --name brokerage-ci
+          trap 'podman pod rm --force brokerage-ci >/dev/null' EXIT
+          podman run --detach --platform linux/amd64 --pod brokerage-ci \
+            --name brokerage-ci-postgresql \
+            --env POSTGRES_USER=audit_admin --env POSTGRES_HOST_AUTH_METHOD=trust \
+            "${POSTGRES_IMAGE_NAME}:${POSTGRES_IMAGE_TAG}@${POSTGRES_IMAGE_INDEX_DIGEST}"
+          podman run --detach --platform linux/amd64 --pod brokerage-ci \
+            --name brokerage-ci-kafka --memory 768m --cpus 1.5 \
+            --volume "${GITHUB_WORKSPACE}/.github/kafka-test-server.sh:/tmp/kafka-test-server.sh:ro" \
+            --entrypoint /bin/bash \
+            "${STRIMZI_KAFKA_IMAGE_NAME}:${STRIMZI_KAFKA_IMAGE_TAG}@${STRIMZI_KAFKA_IMAGE_INDEX_DIGEST}" \
+            /tmp/kafka-test-server.sh
+          for attempt in {1..60}; do
+            if podman exec brokerage-ci-postgresql pg_isready -h 127.0.0.1 -U audit_admin -d postgres; then break; fi
+            sleep 1
+          done
+          podman exec brokerage-ci-postgresql pg_isready -h 127.0.0.1 -U audit_admin -d postgres
+          for attempt in {1..60}; do
+            if podman exec brokerage-ci-kafka /opt/kafka/bin/kafka-broker-api-versions.sh \
+              --bootstrap-server 127.0.0.1:19092 >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          podman exec brokerage-ci-kafka /opt/kafka/bin/kafka-broker-api-versions.sh \
+            --bootstrap-server 127.0.0.1:19092 >/dev/null
+          podman run --rm --platform linux/amd64 \
+            --pod brokerage-ci \
+            --env BROKERAGE_TEST_POSTGRES_PORT=5432 --env BROKERAGE_TEST_POSTGRES_USER=audit_admin \
+            --env BROKERAGE_TEST_KAFKA_BOOTSTRAP=127.0.0.1:19092 \
+            --volume "${GITHUB_WORKSPACE}/apps:/workspace" --workdir /workspace \
+            localhost/brokerage-java-build \
+            mvn -B clean verify org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom \
+              -DincludeTestScope=false -DincludeProvidedScope=false -DoutputFormat=json
+      - name: Check resolved runtime dependencies
+        run: scripts/check-runtime-dependencies apps/target/bom.json --output dependency-findings.json
+      - name: Build representative runtime and verify the actual JVM
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source config/container-images.sh
+          podman build --platform linux/amd64 \
+            --build-arg BUILDARCH=amd64 --build-arg TARGETARCH=amd64 \
+            --build-arg "MAVEN_IMAGE=${MAVEN_IMAGE_MULTIARCH}" \
+            --build-arg "RUNTIME_IMAGE=${JAVA_RUNTIME_IMAGE_MULTIARCH}" \
+            --build-arg "JAVA_JDK_AMD64_SHA256=${JAVA_JDK_AMD64_SHA256}" \
+            --build-arg "JAVA_JDK_ARM64_SHA256=${JAVA_JDK_ARM64_SHA256}" \
+            --build-arg "JAVA_JRE_AMD64_SHA256=${JAVA_JRE_AMD64_SHA256}" \
+            --build-arg "JAVA_JRE_ARM64_SHA256=${JAVA_JRE_ARM64_SHA256}" \
+            --tag localhost/brokerage-runtime --file apps/Containerfile \
+            --ignorefile apps/.containerignore apps/order-service
+          podman run --rm --platform linux/amd64 --entrypoint java \
+            localhost/brokerage-runtime -version 2>&1 | tee runtime-java-version.txt
+          grep -F '21.0.13.1' runtime-java-version.txt
+          podman save --format docker-archive --output runtime-image.tar localhost/brokerage-runtime
+      - name: Scan runtime OS and Java packages
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --location --silent --show-error --retry 3 \
+            https://github.com/aquasecurity/trivy/releases/download/v0.76.2/trivy_0.76.2_Linux-64bit.tar.gz \
+            --output "${RUNNER_TEMP}/trivy.tar.gz"
+          printf '%s  %s\n' bc0fc726e017b8927a62b2d3531d7a84ee01769daf5c99ed866dced54089fdbf \
+            "${RUNNER_TEMP}/trivy.tar.gz" | sha256sum --check --status
+          tar --extract --gzip --file "${RUNNER_TEMP}/trivy.tar.gz" --directory "${RUNNER_TEMP}" trivy
+          # Java dependencies are gated above with exact, dated exceptions.
+          # Scan all OS findings, then reject fixable HIGH/CRITICAL OS issues.
+          "${RUNNER_TEMP}/trivy" image --input runtime-image.tar --scanners vuln \
+            --pkg-types os --format json --output runtime-os-findings.json
+          "${RUNNER_TEMP}/trivy" image --input runtime-image.tar --scanners vuln \
+            --pkg-types os --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1
+      - name: Preserve validation and security evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: java-security-validation
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            apps/target/bom.json
+            apps/*/target/surefire-reports/
+            dependency-findings.json
+            runtime-java-version.txt
+            runtime-os-findings.json
+
+  configuration:
+    name: Helm, scripts, CDK, and Terraform
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '22'
+      - uses: Azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        with:
+          version: v4.3.1
+      - uses: Azure/setup-kubectl@776406bce94f63e41d621b960d78ee25c8b76ede # v4
+        with:
+          version: v1.36.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.15.0
+          terraform_wrapper: false
+      - name: Script syntax and Python regression tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          for script in scripts/*; do
+            if head -n 1 "$script" | grep -q '^#!/usr/bin/env bash'; then bash -n "$script"; fi
+          done
+          bash -n .github/kafka-test-server.sh
+          # Exercise role isolation/history migration in CI as well as locally.
+          # The tests use exec/stdin only: this database needs no network.
+          source config/container-images.sh
+          sudo apt-get update
+          sudo apt-get install --yes podman
+          trap 'podman rm --force brokerage-security-ci-test >/dev/null 2>&1 || true' EXIT
+          podman run --detach --rm --platform linux/amd64 --network none \
+            --name brokerage-security-ci-test --memory 256m --cpus 1 \
+            --env POSTGRES_USER=audit_admin --env POSTGRES_HOST_AUTH_METHOD=trust \
+            "${POSTGRES_IMAGE_NAME}:${POSTGRES_IMAGE_TAG}@${POSTGRES_IMAGE_INDEX_DIGEST}"
+          for attempt in {1..60}; do
+            if podman exec brokerage-security-ci-test pg_isready -h 127.0.0.1 -U audit_admin -d postgres; then break; fi
+            sleep 1
+          done
+          podman exec brokerage-security-ci-test pg_isready -h 127.0.0.1 -U audit_admin -d postgres
+          BROKERAGE_TEST_POSTGRES_CONTAINER=brokerage-security-ci-test \
+            python3 -m unittest discover -s tests -v
+      - name: Render and lint both Kubernetes targets
+        run: |
+          helm lint deploy/helm/brokerage-demo
+          helm template brokerage-demo deploy/helm/brokerage-demo --values deploy/values/values-kind.yaml > /dev/null
+          helm template brokerage-demo deploy/helm/brokerage-demo --values deploy/values/values-eks.yaml > /dev/null
+      - name: CDK type checking, tests, and dependency audit
+        working-directory: infra/aws-cdk
+        run: |
+          npm ci
+          npm run build
+          npm test
+          npm audit --audit-level=high
+      - name: Terraform validation and isolated mock-provider tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          terraform -chdir=infra/datadog-terraform fmt -check
+          test_dir="$(mktemp -d)"
+          cp infra/datadog-terraform/*.tf "$test_dir/"
+          cp -R infra/datadog-terraform/tests "$test_dir/"
+          terraform -chdir="$test_dir" init -backend=false -input=false
+          terraform -chdir="$test_dir" validate
+          terraform -chdir="$test_dir" test
+
+  secrets:
+    name: Check tracked content for secrets
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Scan with a pinned Gitleaks binary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          curl --fail --location --silent --show-error --retry 3 \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
+            --output "${RUNNER_TEMP}/gitleaks.tar.gz"
+          printf '%s  %s\n' 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb \
+            "${RUNNER_TEMP}/gitleaks.tar.gz" | sha256sum --check --status
+          tar --extract --gzip --file "${RUNNER_TEMP}/gitleaks.tar.gz" --directory "${RUNNER_TEMP}" gitleaks
+          "${RUNNER_TEMP}/gitleaks" dir . --redact --no-banner
