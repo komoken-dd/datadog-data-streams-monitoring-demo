@@ -32,6 +32,13 @@ spec:
         port: 9092
         type: internal
         tls: false
+        networkPolicyPeers:
+          - podSelector:
+              matchLabels:
+                app.kubernetes.io/part-of: brokerage-demo
+          - podSelector:
+              matchLabels:
+                strimzi.io/cluster: {{ .Values.kafka.name }}
     config:
       default.replication.factor: {{ .Values.kafka.replicationFactor }}
       min.insync.replicas: {{ .Values.kafka.minInSyncReplicas }}

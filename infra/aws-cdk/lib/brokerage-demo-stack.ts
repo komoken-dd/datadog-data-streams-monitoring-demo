@@ -2,6 +2,10 @@ import * as cdk from "aws-cdk-lib";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
 import * as eks from "aws-cdk-lib/aws-eks";
 import * as iam from "aws-cdk-lib/aws-iam";
+import * as lambda from "aws-cdk-lib/aws-lambda";
+import * as logs from "aws-cdk-lib/aws-logs";
+import * as customResources from "aws-cdk-lib/custom-resources";
+import * as path from "node:path";
 import { KubectlV36Layer } from "@aws-cdk/lambda-layer-kubectl-v36";
 import { Construct } from "constructs";
 
@@ -170,6 +174,48 @@ export class BrokerageDemoStack extends cdk.Stack {
     });
     ebsPodIdentity.addResourceDependency(podIdentityAgentAddon);
 
+    const cniRole = new iam.CfnRole(this, "VpcCniRole", {
+      assumeRolePolicyDocument: {
+        Version: "2012-10-17",
+        Statement: [{
+          Effect: "Allow",
+          Principal: { Service: "pods.eks.amazonaws.com" },
+          Action: ["sts:AssumeRole", "sts:TagSession"],
+          Condition: {
+            StringEquals: {
+              "aws:SourceAccount": this.account,
+              "aws:RequestTag/kubernetes-namespace": "kube-system",
+              "aws:RequestTag/kubernetes-service-account": "aws-node",
+            },
+            ArnEquals: { "aws:SourceArn": cluster.clusterArn },
+          },
+        }],
+      },
+      managedPolicyArns: ["arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"],
+    });
+    const cniPodIdentity = new eks.CfnPodIdentityAssociation(this, "VpcCniPodIdentity", {
+      clusterName: cluster.clusterName,
+      namespace: "kube-system",
+      serviceAccount: "aws-node",
+      roleArn: cniRole.attrArn,
+    });
+    cniPodIdentity.addResourceDependency(podIdentityAgentAddon);
+    const vpcCniAddon = new eks.CfnAddon(this, "VpcCniAddon", {
+      addonName: "vpc-cni",
+      // Verified for EKS 1.36/us-west-2 with DescribeAddonVersions and schema.
+      addonVersion: "v1.23.3-eksbuild.2",
+      clusterName: cluster.clusterName,
+      resolveConflicts: "OVERWRITE",
+      configurationValues: JSON.stringify({
+        enableNetworkPolicy: "true",
+        // Strict mode requires policies for every system endpoint, including DNS.
+        // Isolate application workloads with explicit default-deny policies while
+        // leaving the managed system namespaces operational during migration.
+        env: { NETWORK_POLICY_ENFORCING_MODE: "standard" },
+      }),
+    });
+    vpcCniAddon.addResourceDependency(cniPodIdentity);
+
     const ebsCsiAddon = new eks.CfnAddon(this, "EbsCsiAddon", {
       addonName: "aws-ebs-csi-driver",
       addonVersion: "v1.63.1-eksbuild.1",
@@ -178,8 +224,65 @@ export class BrokerageDemoStack extends cdk.Stack {
     });
     ebsCsiAddon.addResourceDependency(ebsPodIdentity);
 
+    // EKS and CDK provider functions create these log groups outside CloudFormation,
+    // so stack tags do not propagate. Reconcile the real groups, including existing
+    // deployments, rather than trying to create colliding named LogGroup resources.
+    const providerFunctions = this.node.findAll().filter(
+      (node): node is lambda.CfnFunction => node instanceof lambda.CfnFunction,
+    );
+    const serviceLogGroupNames = [
+      "/aws/eks/brokerage-demo/cluster",
+      ...providerFunctions.map((fn) => cdk.Fn.join("", ["/aws/lambda/", fn.ref])),
+    ];
+    const settingsLogs = new logs.LogGroup(this, "LogSettingsHandlerLogs", {
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    const frameworkLogs = new logs.LogGroup(this, "LogSettingsProviderLogs", {
+      retention: logs.RetentionDays.ONE_WEEK,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    });
+    const logArns = serviceLogGroupNames.map((name) => this.formatArn({
+      service: "logs", resource: "log-group", resourceName: name,
+      arnFormat: cdk.ArnFormat.COLON_RESOURCE_NAME,
+    }));
+    const settingsHandler = new lambda.Function(this, "LogSettingsHandler", {
+      runtime: lambda.Runtime.PYTHON_3_13,
+      handler: "handler.on_event",
+      code: lambda.Code.fromAsset(path.join(__dirname, "log-group-settings"), {
+        exclude: ["**/__pycache__/**", "**/*.pyc"],
+      }),
+      timeout: cdk.Duration.minutes(2),
+      logGroup: settingsLogs,
+      initialPolicy: [
+        new iam.PolicyStatement({
+          actions: ["logs:CreateLogGroup", "logs:TagResource", "logs:ListTagsForResource", "logs:PutRetentionPolicy"],
+          resources: [...logArns, ...logArns.map((arn) => `${arn}:*`)],
+        }),
+        // DescribeLogGroups has no resource-level permission support.
+        new iam.PolicyStatement({ actions: ["logs:DescribeLogGroups"], resources: ["*"] }),
+      ],
+    });
+    const settingsProvider = new customResources.Provider(this, "LogSettingsProvider", {
+      onEventHandler: settingsHandler,
+      logGroup: frameworkLogs,
+    });
+    const logSettings = new cdk.CustomResource(this, "ServiceLogGroupSettings", {
+      serviceToken: settingsProvider.serviceToken,
+      properties: {
+        LogGroupNames: serviceLogGroupNames,
+        Tags: projectTags,
+        RetentionDays: 7,
+        Partition: this.partition,
+        Region: this.region,
+        Account: this.account,
+      },
+    });
+    logSettings.node.addDependency(cluster);
+
     new cdk.CfnOutput(this, "ClusterName", { value: cluster.clusterName });
     new cdk.CfnOutput(this, "NodeArchitecture", { value: nodeArchitecture });
+    new cdk.CfnOutput(this, "ManagedServiceLogGroups", { value: cdk.Fn.join(",", serviceLogGroupNames) });
     new cdk.CfnOutput(this, "ConfigureKubectl", {
       value: `aws eks update-kubeconfig --region ${this.region} --name ${cluster.clusterName}`,
     });

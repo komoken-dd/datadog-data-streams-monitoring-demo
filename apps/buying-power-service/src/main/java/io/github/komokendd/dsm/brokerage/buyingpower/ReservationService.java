@@ -27,9 +27,24 @@ class ReservationService {
     @Transactional
     BuyingPowerReservation.Response reserve(BuyingPowerReservation.Request request) {
         var plan = ReservationPlan.of(request);
+        repository.lockReservationOperation(plan.orderId());
+        if (repository.cancelled(plan.orderId())) {
+            return rejected(plan.orderId(), BuyingPowerReservation.RESERVATION_CANCELLED, null);
+        }
         var existing = repository.findReservation(plan.orderId());
         if (existing.isPresent()) {
-            return reservedResponse(existing.get());
+            var prior = existing.get();
+            if (!prior.accountId().equals(plan.accountId()) || !prior.symbol().equals(plan.symbol())
+                    || prior.side() != plan.side() || !prior.orderType().equals(plan.orderType().name())
+                    || prior.quantity() != plan.quantity()
+                    || prior.reservedAmountJpy().compareTo(plan.reservedAmountJpy()) != 0) {
+                throw new IllegalArgumentException("Order ID already belongs to a different reservation");
+            }
+            return prior.open() ? reservedResponse(prior)
+                    : rejected(plan.orderId(), BuyingPowerReservation.RESERVATION_CANCELLED, null);
+        }
+        if (request.reservationDeadline() != null && !java.time.Instant.now().isBefore(request.reservationDeadline())) {
+            return rejected(plan.orderId(), BuyingPowerReservation.RESERVATION_EXPIRED, null);
         }
         if (repository.findAccount(plan.accountId()).isEmpty()) {
             return rejected(plan.orderId(), BuyingPowerReservation.UNKNOWN_ACCOUNT, null);
@@ -49,6 +64,13 @@ class ReservationService {
     }
 
     @Transactional(readOnly = true)
+    java.util.Optional<BuyingPowerReservation.Response> find(String orderId) {
+        return repository.findReservation(orderId).map(reservation -> new BuyingPowerReservation.Response(
+                orderId, reservation.status().name(), null, reservation.reservedAmountJpy(),
+                currentBuyingPower(reservation.accountId())));
+    }
+
+    @Transactional(readOnly = true)
     BuyingPowerReservation.Response existing(String orderId) {
         return repository.findReservation(orderId)
                 .map(this::reservedResponse)
@@ -58,6 +80,10 @@ class ReservationService {
     /** Compensation for an order that was never accepted downstream. Idempotent. */
     @Transactional
     ReleaseResponse release(String orderId) {
+        // A cancellation tombstone fences a late HTTP reservation even when no
+        // reservation row existed at the moment cancellation was requested.
+        repository.lockReservationOperation(orderId);
+        repository.recordCancellation(orderId);
         var reservation = repository.lockReservation(orderId);
         if (reservation.isEmpty()) {
             return new ReleaseResponse(orderId, "NOT_FOUND", Jpy.of(0), 0);

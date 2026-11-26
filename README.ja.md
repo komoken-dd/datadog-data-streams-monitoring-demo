@@ -201,6 +201,11 @@ Schema Tracking の参考情報は
 https://docs.datadoghq.com/data_streams/schema_tracking/ を参照してください。このデモは
 Schema Registry をデプロイせず、Schema Tracking が利用できない場合も動作します。
 
+## セキュリティと移行
+
+既存環境を更新する前に [セキュリティ・移行ガイド](docs/security-and-migration.md) を確認してください。
+デプロイには Python 3 が必要です。API 認証・通信制限・DB 権限分離を適用し、既存データは自動初期化しません。
+
 ## サポートとライセンス
 
 質問と不具合報告は GitHub Issues で受け付けます。Pull Request は受け付けません。

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+require_command kubectl
+require_command python3
+kubectl -n kube-system get daemonset -o json | python3 -c '
+import json, sys
+daemonsets = json.load(sys.stdin)["items"]
+for item in daemonsets:
+    name = item["metadata"]["name"]
+    if item.get("status", {}).get("numberReady", 0) < 1:
+        continue
+    if name in ("cilium", "calico-node"):
+        print("Network policy provider: " + name)
+        sys.exit(0)
+    if name == "aws-node":
+        for container in item["spec"]["template"]["spec"]["containers"]:
+            if container["name"] == "aws-eks-nodeagent" and any("enable-network-policy=true" in arg for arg in container.get("args", [])):
+                print("Network policy provider: Amazon VPC CNI")
+                sys.exit(0)
+raise SystemExit("No ready network-policy provider detected. Provision Cilium for a new kind cluster or enable the managed EKS VPC CNI policy agent; existing kindnet does not enforce these policies. See docs/security-and-migration.md.")
+'

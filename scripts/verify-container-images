@@ -6,6 +6,47 @@ source "${PROJECT_ROOT}/config/container-images.sh"
 
 require_command podman
 require_command jq
+require_command curl
+require_command tar
+
+verify_java_archive() {
+  local kind="$1" architecture="$2" expected="$3"
+  local archive_directory actual java_arch release_path
+  case "${architecture}" in
+    amd64) java_arch=x64 ;;
+    arm64) java_arch=aarch64 ;;
+    *) die "Unsupported Java archive architecture: ${architecture}" ;;
+  esac
+  archive_directory="$(mktemp -d "${TMPDIR:-/tmp}/brokerage-java-archive.XXXXXX")"
+  if ! curl --fail --location --silent --show-error --retry 3 \
+    "https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.13.1%2B2/OpenJDK21U-${kind}_${java_arch}_linux_hotspot_${JAVA_PATCHED_RELEASE}.tar.gz" \
+    --output "${archive_directory}/java.tar.gz"; then
+    rm -rf -- "${archive_directory}"
+    die "Unable to obtain the locked Java ${kind}/${architecture} archive."
+  fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "${archive_directory}/java.tar.gz" | awk '{print $1}')"
+  else
+    actual="$(shasum -a 256 "${archive_directory}/java.tar.gz" | awk '{print $1}')"
+  fi
+  if [[ "${actual}" != "${expected}" ]]; then
+    rm -rf -- "${archive_directory}"
+    die "Java archive checksum mismatch for ${kind}/${architecture}."
+  fi
+  release_path="$(tar -tzf "${archive_directory}/java.tar.gz" | awk '/\/release$/ {print}')"
+  if ! tar -xOzf "${archive_directory}/java.tar.gz" "${release_path}" \
+    | grep -Fx "JAVA_VERSION=\"${JAVA_PATCHED_VERSION}\"" >/dev/null; then
+    rm -rf -- "${archive_directory}"
+    die "Java archive version mismatch for ${kind}/${architecture}."
+  fi
+  rm -rf -- "${archive_directory}"
+  echo "Verified Java ${JAVA_PATCHED_VERSION} ${kind}/${architecture} archive and release metadata."
+}
+
+verify_java_archive jdk amd64 "${JAVA_JDK_AMD64_SHA256}"
+verify_java_archive jdk arm64 "${JAVA_JDK_ARM64_SHA256}"
+verify_java_archive jre amd64 "${JAVA_JRE_AMD64_SHA256}"
+verify_java_archive jre arm64 "${JAVA_JRE_ARM64_SHA256}"
 
 verify_index_digest() {
   local image_name="$1"
@@ -58,7 +99,7 @@ verify_config_digest() {
 }
 
 verify_index_digest docker.io/library/maven "${MAVEN_IMAGE_TAG}" "${MAVEN_IMAGE_INDEX_DIGEST}"
-verify_index_digest docker.io/library/eclipse-temurin "${JAVA_RUNTIME_IMAGE_TAG}" "${JAVA_RUNTIME_IMAGE_INDEX_DIGEST}"
+verify_index_digest "${JAVA_RUNTIME_IMAGE_NAME}" "${JAVA_RUNTIME_IMAGE_TAG}" "${JAVA_RUNTIME_IMAGE_INDEX_DIGEST}"
 verify_index_digest docker.io/kindest/node "${KIND_NODE_IMAGE_TAG}" "${KIND_NODE_IMAGE_INDEX_DIGEST}"
 verify_index_digest "${POSTGRES_IMAGE_NAME}" "${POSTGRES_IMAGE_TAG}" "${POSTGRES_IMAGE_INDEX_DIGEST}"
 verify_index_digest "${STRIMZI_OPERATOR_IMAGE_NAME}" "${STRIMZI_OPERATOR_IMAGE_TAG}" "${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}"
@@ -71,8 +112,8 @@ verify_index_digest "${DATADOG_APM_INJECT_IMAGE_NAME}" "${DATADOG_APM_INJECT_IMA
 
 verify_platform_digest docker.io/library/maven "${MAVEN_IMAGE_TAG}" amd64 "${MAVEN_IMAGE_AMD64#*@}"
 verify_platform_digest docker.io/library/maven "${MAVEN_IMAGE_TAG}" arm64 "${MAVEN_IMAGE_ARM64#*@}"
-verify_platform_digest docker.io/library/eclipse-temurin "${JAVA_RUNTIME_IMAGE_TAG}" amd64 "${JAVA_RUNTIME_IMAGE_AMD64#*@}"
-verify_platform_digest docker.io/library/eclipse-temurin "${JAVA_RUNTIME_IMAGE_TAG}" arm64 "${JAVA_RUNTIME_IMAGE_ARM64#*@}"
+verify_platform_digest "${JAVA_RUNTIME_IMAGE_NAME}" "${JAVA_RUNTIME_IMAGE_TAG}" amd64 "${JAVA_RUNTIME_IMAGE_AMD64#*@}"
+verify_platform_digest "${JAVA_RUNTIME_IMAGE_NAME}" "${JAVA_RUNTIME_IMAGE_TAG}" arm64 "${JAVA_RUNTIME_IMAGE_ARM64#*@}"
 verify_platform_digest docker.io/kindest/node "${KIND_NODE_IMAGE_TAG}" amd64 "${KIND_NODE_IMAGE_AMD64#*@}"
 verify_platform_digest docker.io/kindest/node "${KIND_NODE_IMAGE_TAG}" arm64 "${KIND_NODE_IMAGE_ARM64#*@}"
 verify_platform_digest "${POSTGRES_IMAGE_NAME}" "${POSTGRES_IMAGE_TAG}" amd64 "${POSTGRES_IMAGE_AMD64_DIGEST}"
@@ -92,6 +133,8 @@ verify_platform_digest "${DATADOG_CLUSTER_AGENT_IMAGE_NAME}" "${DATADOG_CLUSTER_
 verify_platform_digest "${DATADOG_JAVA_TRACER_IMAGE_NAME}" "${DATADOG_JAVA_TRACER_IMAGE_TAG}" arm64 "${DATADOG_JAVA_TRACER_IMAGE_ARM64_DIGEST}"
 verify_platform_digest "${DATADOG_APM_INJECT_IMAGE_NAME}" "${DATADOG_APM_INJECT_IMAGE_TAG}" arm64 "${DATADOG_APM_INJECT_IMAGE_ARM64_DIGEST}"
 
+verify_config_digest "${JAVA_RUNTIME_IMAGE_NAME}" "${JAVA_RUNTIME_IMAGE_AMD64#*@}" amd64 "${JAVA_RUNTIME_IMAGE_AMD64_CONFIG_DIGEST}"
+verify_config_digest "${JAVA_RUNTIME_IMAGE_NAME}" "${JAVA_RUNTIME_IMAGE_ARM64#*@}" arm64 "${JAVA_RUNTIME_IMAGE_ARM64_CONFIG_DIGEST}"
 verify_config_digest "${POSTGRES_IMAGE_NAME}" "${POSTGRES_IMAGE_AMD64_DIGEST}" amd64 "${POSTGRES_IMAGE_AMD64_CONFIG_DIGEST}"
 verify_config_digest "${STRIMZI_OPERATOR_IMAGE_NAME}" "${STRIMZI_OPERATOR_IMAGE_AMD64_DIGEST}" amd64 "${STRIMZI_OPERATOR_IMAGE_AMD64_CONFIG_DIGEST}"
 verify_config_digest "${STRIMZI_KAFKA_IMAGE_NAME}" "${STRIMZI_KAFKA_IMAGE_AMD64_DIGEST}" amd64 "${STRIMZI_KAFKA_IMAGE_AMD64_CONFIG_DIGEST}"

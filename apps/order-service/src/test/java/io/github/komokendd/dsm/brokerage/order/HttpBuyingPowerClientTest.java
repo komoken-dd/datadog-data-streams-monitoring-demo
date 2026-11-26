@@ -85,12 +85,12 @@ class HttpBuyingPowerClientTest {
     }
 
     @Test
-    void releaseSwallowsFailures() {
+    void failedCancellationRemainsUnconfirmed() {
         server.expect(requestTo(BASE + BuyingPowerReservation.RESERVATIONS_PATH + "/o-1/release"))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withServerError());
 
-        client.release("o-1");
+        assertThat(client.cancel("o-1")).isFalse();
 
         server.verify();
     }

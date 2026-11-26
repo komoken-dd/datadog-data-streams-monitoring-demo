@@ -23,12 +23,13 @@ class OrderQueryController {
     @GetMapping("/{orderId}")
     OrderView get(@PathVariable String orderId) {
         List<ExecutionView> executions = jdbc.query("""
-                select execution_id, sequence, quantity, price, executed_at, buying_power_reflected_at,
+                select execution_event_id, execution_id, sequence, quantity, price, executed_at, buying_power_reflected_at,
                        trade_report_issued_at, notification_delivered_at
                   from order_state_service.executions
                  where order_id = ?
                  order by sequence, executed_at
                 """, (rs, row) -> new ExecutionView(
+                rs.getString("execution_event_id"),
                 rs.getString("execution_id"),
                 rs.getInt("sequence"),
                 rs.getLong("quantity"),
@@ -75,6 +76,7 @@ class OrderQueryController {
     }
 
     record ExecutionView(
+            String executionEventId,
             String executionId,
             int sequence,
             long quantity,

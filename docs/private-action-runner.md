@@ -73,8 +73,12 @@ cluster is not the one this dashboard should control.
 
 Open **Workflow Automation > Connections**, select **New Connection > HTTP**,
 and create one Connection for each row. Set **Type** to **Private Action
-Runner**, select the runner verified above, and use **No authentication** for
-this synthetic demo.
+Runner**, select the runner verified above, and use **Token authentication**.
+Set the credential file path to
+`/etc/datadog-agent/brokerage-credentials/http-token.json`. The deployment projects
+only the operator credential into the runner Secret and mounts it read-only;
+keep this matched to the selected cluster. Do not put token values in Terraform
+or workflow parameters.
 
 | Suggested name | Base URL | Terraform variable | Used by |
 |---|---|---|---|
@@ -87,10 +91,12 @@ this synthetic demo.
 These are the same five hostnames as the Helm chart's PAR `http_allowlist`.
 A base URL for any other host is rejected by the runner.
 
-No authentication is acceptable here only because the endpoints are
-demo-only, `ClusterIP`-only, and additionally constrained by the runner's HTTP
-allowlist. Use authentication and least-privilege credentials for real internal
-services.
+Authentication is required even for this synthetic ClusterIP-only demo.
+An unauthenticated connection now receives HTTP 401. The runner's hostname
+allowlist, workload NetworkPolicies, and bearer credential are separate
+boundaries. See [security and migration](security-and-migration.md).
+The HTTP private-action credential format is documented at
+https://docs.datadoghq.com/actions/connections/private_action_credentials/.
 
 Record each Connection UUID from its Datadog connection details. A Connection
 is bound to one selected runner, so do not reuse EKS connection IDs for a kind

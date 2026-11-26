@@ -43,11 +43,12 @@ class RedriveServiceTest {
         AtomicInteger ids = new AtomicInteger();
         service = new RedriveService(repository, kafka, Clock.fixed(NOW, ZoneOffset.UTC),
                 () -> "redrive-" + ids.incrementAndGet());
+        when(repository.unresolvedSummary()).thenReturn(new NotificationDeadLetterRepository.UnresolvedSummary(0, null));
     }
 
     @Test
     void succeedsWithoutPublishingWhenThereIsNothingToRedrive() throws Exception {
-        when(repository.lockUnresolved()).thenReturn(List.of());
+        when(repository.lockUnresolved(100)).thenReturn(List.of());
 
         var result = service.redrive();
 
@@ -59,7 +60,7 @@ class RedriveServiceTest {
 
     @Test
     void republishesEachUnresolvedRequestWithTheSameNotificationIdAndRedriveHeaders() throws Exception {
-        when(repository.lockUnresolved()).thenReturn(List.of(
+        when(repository.lockUnresolved(100)).thenReturn(List.of(
                 DeadLetters.row("dead-1", "notification-1", NOW.minusSeconds(90)),
                 DeadLetters.row("dead-2", "notification-2", NOW.minusSeconds(30))));
         when(kafka.send(any(ProducerRecord.class))).thenReturn(CompletableFuture.completedFuture(null));
@@ -95,7 +96,7 @@ class RedriveServiceTest {
 
     @Test
     void leavesTheDeadLetterUnresolvedWhenKafkaDoesNotAcknowledge() {
-        when(repository.lockUnresolved()).thenReturn(List.of(
+        when(repository.lockUnresolved(100)).thenReturn(List.of(
                 DeadLetters.row("dead-1", "notification-1", NOW.minusSeconds(90))));
         CompletableFuture<SendResult<String, Object>> failed =
                 CompletableFuture.failedFuture(new IllegalStateException("broker unavailable"));

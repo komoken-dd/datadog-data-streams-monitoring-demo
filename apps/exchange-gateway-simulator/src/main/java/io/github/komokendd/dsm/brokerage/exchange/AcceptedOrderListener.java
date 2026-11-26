@@ -7,6 +7,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 /** Only books the order; matching happens on the scheduler so the listener stays fast during bursts. */
 @Component
@@ -23,6 +24,7 @@ class AcceptedOrderListener {
             topics = Topics.ORDERS_ACCEPTED,
             groupId = "exchange-gateway-simulator-v1",
             containerFactory = "acceptedOrderListenerFactory")
+    @Transactional
     void onOrderAccepted(OrderAcceptedEvent event) {
         boolean inserted = repository.insert(ExchangeEvents.workingOrder(event));
         try (var ignored = EventLogContext.open(

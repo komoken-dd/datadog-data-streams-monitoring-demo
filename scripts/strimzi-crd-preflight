@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+source "${PROJECT_ROOT}/config/container-images.sh"
+
+mode="${1:-plan}"
+expected_context="${2:-${BROKERAGE_DEMO_EXPECTED_CONTEXT:-}}"
+[[ $# -le 2 ]] || die "Usage: scripts/strimzi-crd-preflight [plan|apply] <expected-context>"
+case "${mode}" in plan|apply) ;; *) die "Mode must be plan or apply." ;; esac
+[[ -n "${expected_context}" ]] || die "An explicit expected Kubernetes context is required."
+require_command helm
+require_command kubectl
+require_exact_context "${expected_context}"
+work_dir="$(mktemp -d "${TMPDIR:-/tmp}/brokerage-strimzi-crds.XXXXXX")"
+trap 'rm -rf -- "${work_dir}"' EXIT
+chart_ref="oci://quay.io/strimzi-helm/strimzi-kafka-operator@${STRIMZI_CHART_DIGEST}"
+# Helm does not upgrade CRDs in an installed chart. Fetch the exact reviewed
+# chart rather than a mutable version tag, and fail closed on retrieval errors.
+helm show crds "${chart_ref}" >"${work_dir}/crds.yaml"
+[[ -s "${work_dir}/crds.yaml" ]] || die "The locked Strimzi chart returned no CRDs."
+grep -q '^kind: CustomResourceDefinition$' "${work_dir}/crds.yaml" || die "The locked chart did not return CRDs."
+# The context flag binds every request even if another process changes the
+# current kubeconfig context after the initial check. Never force ownership.
+kubectl --context "${expected_context}" apply --server-side \
+  --field-manager brokerage-demo-strimzi-crds --dry-run=server \
+  --filename "${work_dir}/crds.yaml" >/dev/null
+if [[ "${mode}" == apply ]]; then
+  kubectl --context "${expected_context}" apply --server-side \
+    --field-manager brokerage-demo-strimzi-crds \
+    --filename "${work_dir}/crds.yaml"
+  kubectl --context "${expected_context}" wait --for=condition=Established \
+    --timeout=60s --filename "${work_dir}/crds.yaml"
+else
+  echo "Strimzi ${STRIMZI_OPERATOR_IMAGE_TAG} cluster-wide CRD server preflight passed; no changes made."
+fi

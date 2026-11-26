@@ -31,22 +31,32 @@ start_port_forward order-service 18086
 pids+=("${PORT_FORWARD_PID}")
 start_port_forward order-state-service 18087
 pids+=("${PORT_FORWARD_PID}")
+start_port_forward holdings-service 18088
+pids+=("${PORT_FORWARD_PID}")
+request_key="$(python3 -c 'import uuid; print(uuid.uuid4())')"
 
 # A regular demo account buys one trading unit of a fictional stock at market.
-response="$(curl -fsS -X POST http://127.0.0.1:18086/orders \
+response="$(operator_curl -fsS -X POST http://127.0.0.1:18086/orders \
   -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: ${request_key}" \
   -d '{"accountId":"A00001","symbol":"D101","side":"BUY","orderType":"MARKET","quantity":100}')"
 order_id="$(jq -er '.orderId' <<<"${response}")"
 echo "Submitted smoke-test order: ${order_id}"
 
 for _ in {1..90}; do
-  if state="$(curl -fsS "http://127.0.0.1:18087/internal/orders/${order_id}" 2>/dev/null)"; then
+  if state="$(operator_curl -fsS "http://127.0.0.1:18087/internal/orders/${order_id}" 2>/dev/null)"; then
     status="$(jq -r '.status' <<<"${state}")"
     pending="$(jq '[.executions[] | select(.buyingPowerReflectedAt == null or .tradeReportIssuedAt == null or .notificationDeliveredAt == null)] | length' <<<"${state}")"
     executions="$(jq '.executions | length' <<<"${state}")"
+    holdings_pending=0
+    while IFS= read -r event_id; do
+      if ! operator_curl -fsS "http://127.0.0.1:18088/internal/holdings/events/${event_id}" | jq -e '.applied == true' >/dev/null; then
+        holdings_pending=$((holdings_pending + 1))
+      fi
+    done < <(jq -r '.executions[].executionEventId' <<<"${state}")
     echo "Observed status: ${status}, executions: ${executions}, awaiting downstream reflection: ${pending}"
-    if [[ "${status}" == "FILLED" && "${executions}" -gt 0 && "${pending}" -eq 0 ]]; then
-      echo "Order filled; buying power, trade report, and notification reflected for every execution."
+    if [[ "${status}" == "FILLED" && "${executions}" -gt 0 && "${pending}" -eq 0 && "${holdings_pending}" -eq 0 ]]; then
+      echo "Order filled; buying power, holdings, trade report, and notification reflected for every execution."
       exit 0
     fi
   fi

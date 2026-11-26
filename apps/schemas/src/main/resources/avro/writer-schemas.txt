@@ -1,0 +1,8 @@
+# Immutable historical writers. Add a snapshot before publishing an evolved schema.
+avro/v1/BuyingPowerUpdatedEvent.avsc
+avro/v1/ExecutionReportEvent.avsc
+avro/v1/NotificationDeliveredEvent.avsc
+avro/v1/NotificationRequest.avsc
+avro/v1/OrderAcceptedEvent.avsc
+avro/v1/OrderExpiredEvent.avsc
+avro/v1/TradeReportIssuedEvent.avsc

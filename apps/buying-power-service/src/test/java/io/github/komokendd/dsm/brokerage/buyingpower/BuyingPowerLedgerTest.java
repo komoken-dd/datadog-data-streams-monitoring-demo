@@ -51,7 +51,8 @@ class BuyingPowerLedgerTest {
     @Test
     void sellFillIsReflectedAndPublishedKeyedByAccount() {
         when(processed.claim("exec-event-1")).thenReturn(true);
-        when(repository.lockReservation("o-2")).thenReturn(Optional.of(BuyingPowerRulesTest.sellReservation(100)));
+        when(repository.lockReservation("o-2")).thenReturn(Optional.of(new ReservationState("o-2", "A00451", "D105", io.github.komokendd.dsm.brokerage.common.Side.SELL,
+                        "MARKET", 100, Jpy.of(0), Jpy.of(0), 100, 0, ReservationState.Status.RESERVED)));
 
         var published = ledger.applyExecution(sellExecution());
 
@@ -121,7 +122,8 @@ class BuyingPowerLedgerTest {
         when(repository.lockReservation("o-2")).thenReturn(Optional.empty());
         when(repository.applyToAccount(anyString(), any())).thenReturn(false);
 
-        assertThat(ledger.applyExecution(sellExecution())).isEmpty();
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> ledger.applyExecution(sellExecution()))
+                .isInstanceOf(IllegalStateException.class).hasMessageContaining("no known reservation");
         verifyNoInteractions(kafka);
     }
 

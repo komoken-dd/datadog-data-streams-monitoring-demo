@@ -172,7 +172,7 @@ resource "datadog_workflow_automation" "redrive" {
   count = var.enable_workflows ? 1 : 0
 
   name        = "証券デモ - 未達通知の再送 (Redrive)"
-  description = "未解決の通知デッドレターをすべて 5 秒の再試行トピックへ再送 (Redrive) し、お客様に約定通知・失効通知を届けます。"
+  description = "未解決の通知デッドレターを 5 秒の再試行トピックへ再投入します。既定では 1 回最大 100 件・送信予算 5 秒のバッチです。結果の remainingCount がゼロになるまで繰り返し、配信完了は配信イベントで確認してください。"
   tags        = local.workflow_tags
   published   = true
 

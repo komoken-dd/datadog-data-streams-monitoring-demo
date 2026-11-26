@@ -90,6 +90,7 @@ flowchart TB
 
             KAFKA -.->|"Consume all nine topics"| STATE
 
+            ORDER -->|"Store submissions and accepted-order outbox"| POSTGRES
             BP -->|"Store cash, reservations, sellable shares"| POSTGRES
             EXCH -->|"Store working orders"| POSTGRES
             HOLD -->|"Store holdings"| POSTGRES
@@ -162,27 +163,44 @@ The most important design decision is where Kafka sits.
 |---|---|---|
 | Customer order → buying-power or sellable-quantity check and reservation | Synchronous HTTP, before the order is accepted | A real order management system checks buying power in line. The customer learns immediately whether the order was accepted or rejected, and an accepted order already holds its reservation. |
 | Exchange execution reports → buying power, holdings, trade reports, notifications, order inquiry | Kafka | Fan-out of execution data is where online brokers use asynchronous messaging, and where consumer lag reaches customers: sale proceeds that are not yet reflected, stale order inquiry, late notifications. |
-| Retry, DLT, and redrive | Customer notifications only | A notification is idempotent by `notification_id`, so re-sending is safe. Orders are never automatically re-sent: re-submitting a stale order after the market has moved is a trading incident, not a recovery pattern. |
+| Retry topics, DLT, and redrive | Customer notifications only | A notification is idempotent by `notification_id`. Recovery never creates a replacement financial order. Outbox transport retries preserve the original accepted event ID, payload, and acceptance time. |
 
-`order-service` calls `buying-power-service` at
-`POST /internal/buying-power/reservations` before it publishes anything.
+`POST /orders` requires an `Idempotency-Key` header for one logical order.
+`order-service` first persists the submission, its stable order/event IDs, and
+a 30-second reservation deadline in its own PostgreSQL schema. It then calls
+`POST /internal/buying-power/reservations` synchronously.
 
-- `200 RESERVED`: the order is published to `brokerage.orders.accepted.v1` and
-  the customer receives `202 ACCEPTED` with the reserved amount.
-- `422 REJECTED`: the customer receives the reason
-  (`INSUFFICIENT_BUYING_POWER`, `INSUFFICIENT_SELLABLE_QUANTITY`, or
-  `UNKNOWN_ACCOUNT`). Nothing is published.
-- Buying-power service unavailable: the customer receives
-  `503 BUYING_POWER_UNAVAILABLE`.
-- Kafka publish failure after a successful reservation: the reservation is
-  released through the idempotent
-  `POST /internal/buying-power/reservations/{orderId}/release` compensation and
-  the customer receives `503 ORDER_PUBLISH_FAILED`.
+- `200 RESERVED`: acceptance and the exact serialized accepted-order event are
+  committed atomically to the order-service database. The customer receives
+  `202 ACCEPTED`; an outbox relay publishes the committed event to Kafka.
+- `422 REJECTED`: the rejection is stored and returned. Nothing is published.
+- An uncertain reservation response returns `503 RESERVATION_OUTCOME_PENDING`
+  with the original `orderId`, `eventId`, and `statusUrl`. Query
+  `GET /orders/{orderId}`; do not create a replacement order. Repeating the
+  original request with the same key returns the original result; changing
+  its terms under that key returns `409 IDEMPOTENCY_KEY_CONFLICT`.
+- Recovery looks up the original reservation; it does not create a new trade.
+  Before acceptance, a submission that passes its reservation deadline is
+  cancelled using an idempotent cancellation tombstone in buying-power-service.
+  The tombstone and reservation share a per-order database fence, preventing
+  a late HTTP reservation from committing after cancellation. An unconfirmed
+  cancellation remains durable and is retried after restart.
+- Kafka acknowledgment uncertainty never releases an accepted order's hold.
+  The relay retries only the exact committed event bytes and stable identity.
 
-Input errors (unknown symbol, quantity not a multiple of 100, limit price off
-tick or outside the daily limit) return `400 INVALID_ORDER`. Every rejection
-increments `demo.brokerage.orders.rejected` with a bounded `reason` tag and
-writes an `ORDER_REJECTED` log line.
+Input errors return `400 INVALID_ORDER`. Definitive financial rejections use a
+bounded `reason` metric tag and an `ORDER_REJECTED` log. Pending submissions
+and unpublished acceptances have count and oldest-age gauges under
+`demo.brokerage.order_submissions.*`.
+
+Each finite demo epoch admits at most 50,000 valid logical submissions,
+including rejected financial requests. A transactional PostgreSQL trigger
+counts actual inserts, so duplicate-key inquiries and concurrent retries do
+not consume additional budget. Once exhausted, new requests return
+`429 DEMO_EPOCH_LIMIT_REACHED` before any remote reservation. Existing requests
+remain queryable. Use the documented offline epoch reset; never prune event
+identities independently of Kafka replay state. Epoch usage and limit are
+reported under `demo.brokerage.demo_epoch.*`.
 
 ## Kafka topics and partitioning
 
@@ -200,9 +218,11 @@ writes an `ORDER_REJECTED` log line.
 
 Every record on every topic is keyed by `account_id`.
 
-- Buying power is per account. Executions, expiries, and reservation releases
-  for one account must be applied in order, and keying by account keeps them
-  on one partition.
+- Buying power is per account. Account keys preserve order within each topic
+  partition. They do not order independent execution and expiry topics or
+  synchronous HTTP requests. Buying-power reflection therefore tracks locally
+  applied fill quantity and expired quantity separately and keeps the hold for
+  any already-executed but not yet reflected fills.
 - Keying by symbol would put every `D105` event on one partition during the
   sell-off and create a hot partition exactly when the system is under the
   most load. Account keys spread the same burst across partitions.
@@ -225,14 +245,15 @@ Buying power is `cash - reserved`.
 
 - A BUY reserves `price × quantity`, where the price is the limit price, or the
   daily upper limit for a market order.
-- On each BUY fill, `buying-power-service` releases
-  `reserved × executed / quantity` (the last fill releases the remainder),
+- On each BUY fill, `buying-power-service` advances the cumulative settled
+  proportion of the reservation (rounded down, with an exact terminal remainder),
   debits the executed amount, and adds the shares to sellable quantity so they
   can be resold the same day.
 - A SELL reserves sellable shares. A SELL fill removes the shares and credits
   the executed amount to cash immediately, so sale proceeds can be reused the
   same day.
-- An expiry releases the remaining reservation.
+- An expiry releases only the expired portion. Any executed quantity not yet
+  reflected locally remains reserved until its execution events are applied.
 
 `order-state-service` records, for every execution, when buying power was
 reflected, when the trade report was issued, and when the customer
@@ -254,9 +275,11 @@ view, and the smoke test uses it to confirm end-to-end reflection.
   producers in the default DSM map. The full-topology setting adds the
   consumer edges.
 - APM traces follow the synchronous path from `order-flow-simulator` through
-  `order-service` and `buying-power-service` to the accepted-order produce and
-  its consumers. Executions start new traces at the exchange simulator's
-  matching scheduler.
+  `order-service` and `buying-power-service`. Outboxes persist the append-time
+  W3C trace parent and restore it on `outbox.publish`, including after restart.
+  Rows created without an active parent (including scheduled reconciliation)
+  start a fresh trace; business IDs correlate those boundaries. Executions
+  originate independently at the exchange simulator's matching scheduler.
 - The Java tracer sends APM traces and DSM stats to the node-local Agent on TCP
   port 8126. Micrometer sends custom metrics through DogStatsD on UDP port 8125.
 - Applications write structured logs to standard output. The node Agent tails
@@ -275,11 +298,32 @@ view, and the smoke test uses it to confirm end-to-end reflection.
 - Event timestamps are UTC instants. Trade dates are derived in `Asia/Tokyo`.
 - Unique business identifiers appear in logs and spans, not metric tags.
 
+New messages use Avro single-object encoding: the standard `C3 01` marker,
+little-endian CRC-64-AVRO writer-schema fingerprint, then the binary datum.
+Consumers resolve the writer from immutable schemas bundled in
+`apps/schemas/src/main/resources/avro/writer-schemas.txt` and use their current
+generated schema as the reader. Unframed messages retained from the original
+demo are decoded only with the frozen `avro/v1` writer, never by guessing the
+writer layout from the current reader. Unknown fingerprints and malformed or
+trailing bytes fail visibly under the listener's failure policy.
+
+Before publishing an evolved writer, preserve its immutable schema in the
+catalog and roll out readers that recognize its fingerprint. Do not change
+decimal/logical-type semantics while retaining the same canonical fingerprint.
+The first framing upgrade requires stopping and draining application traffic,
+including retry and outbox work, upgrading all readers, then resuming traffic.
+Earlier binaries cannot decode framed records, so a rollback must retain a
+reader supporting this envelope. These migration requirements are independent
+of a schema-level backward-compatibility check; wire-format regression tests
+exercise retained raw v1, framed v1, and an evolved writer's actual bytes.
+
 ## Delivery and idempotency
 
 The demo uses at-least-once Kafka delivery.
 
-- Producers wait for Kafka send completion before listener methods return.
+- Consumers that publish derived events synchronously wait for send completion
+  before their listener returns. Outbox relays instead wait for broker acknowledgment
+  after the source business transaction has already committed.
 - Derived event IDs are deterministic from the input event ID and output type.
   A redelivered input therefore produces the same downstream event ID, and the
   same `notification_id` for the same execution or expiry.
@@ -292,11 +336,35 @@ The demo uses at-least-once Kafka delivery.
 - Redrive creates a new event ID while preserving the original `order_id` and
   `notification_id`, and marks the record with the `brokerage-redriven` header.
 
-These measures reduce duplicate side effects, but they do not make the local
-database transaction and Kafka publish atomic. The demo does not implement a
-transactional outbox. A production system that must guarantee atomic state
-changes and event publication should use an outbox, Kafka transactions, or an
-equivalent design and test its failure recovery explicitly.
+Order acceptance and exchange matching use transactional outboxes. The matching
+transaction fences overlapping schedulers, advances the book, and stores exact
+serialized output bytes before any Kafka publication. A broker timeout or a
+database failure after acknowledgment can duplicate the same stored event;
+it cannot cause a different fill to be recomputed under that event ID. Relays
+serialize publication, bound their batches, and preserve committed bytes across
+application upgrades. Completed exchange order IDs retain compact deduplication
+tombstones after detailed book rows are purged.
+
+Outboxes also store bounded W3C `traceparent`/`tracestate` metadata separately
+from the exact payload bytes. A relay uses that original parent rather than an
+unrelated scheduler span; duplicate appends and publication retries cannot
+replace it. Baggage and arbitrary HTTP headers are not persisted. Existing rows
+without metadata start fresh traces. This preserves the append-time APM parent,
+not Datadog's separate DSM pathway context; no end-to-end DSM continuity across
+an outbox is asserted. Broker acknowledgments and PostgreSQL fault tests do not
+prove telemetry delivery to Datadog.
+
+Other derived-event producers still combine a local database transaction with
+a synchronous Kafka send. Their database and broker commits are not a single
+atomic transaction, so this demo is not a universal exactly-once processing
+reference. Test and extend those boundaries before applying the pattern to
+production systems.
+
+Unexpected listener/deserialization failures use an explicit container-stopping
+error handler. The affected container stops rather than logging and skipping
+its failed business record. Investigate and recover it; restarting replays the
+unprocessed record. Notification provider failures still follow their explicit
+retry/DLT policy.
 
 ## Notification retry, DLT, and redrive
 
@@ -314,11 +382,19 @@ the record was written. This blocking wait makes the 5-second and 30-second
 hops visible on the demo timeline. It occupies consumer threads and is not a
 production retry-scheduling pattern.
 
-`exception-management-service` persists each DLT record. Redrive republishes
-every currently unresolved notification to the 5-second retry topic with its
-retry count reset to 0, and marks each row resolved only after Kafka
-acknowledges the write. Calling it with no unresolved rows is a successful
-no-op.
+`exception-management-service` persists each DLT record. Redrive republishes a
+bounded batch to the 5-second retry topic with its retry count reset to 0, and
+marks rows resolved only after Kafka acknowledges the write. Defaults are 100
+rows and a five-second Kafka send budget (`demo.notification-redrive.batch-size`
+and `demo.notification-redrive.max-duration`). The response reports
+`redrivenCount` and `remainingCount`; repeat while work remains. Concurrent
+requests select separate batches with `FOR UPDATE SKIP LOCKED`; each database
+transaction also has a 15-second timeout. Checked send
+failures, acknowledgment timeouts, and interruption roll back that batch's DB
+changes. Kafka writes already acknowledged cannot be undone by this rollback;
+retries preserve `notification_id` for the simulated provider's dedupe window.
+Calling it with no available rows is a successful no-op. A resolved DLT row
+means queued for retry, not confirmed delivered to the customer.
 
 Orders, executions, and buying-power updates have no retry topic or DLT. A
 failure on those paths is visible as consumer lag and errors in DSM and APM,
@@ -421,5 +497,13 @@ DatadogAgent resource configures both node and Cluster Agent runners.
   verify Secrets provisioned by an external secret manager.
 - The EKS public API endpoint requires an explicit administrator CIDR.
 - The EKS administrator IAM role is supplied at deployment time.
-- Containers run as non-root, use the runtime-default seccomp profile, disallow
-  privilege escalation, and drop Linux capabilities.
+- Application containers run as non-root, use the runtime-default seccomp profile,
+  disallow privilege escalation, and drop Linux capabilities. PostgreSQL uses the
+  vendor entrypoint for volume initialization before its server drops privileges.
+- API access uses separate operator/service credentials, with incoming SHA-256
+  verifiers rather than plaintext operator tokens in application containers.
+- Runtime database roles are isolated per schema; separate init-container identities
+  run migrations. Namespace default-deny policies require an enforcing CNI.
+
+See [security defaults and migration](security-and-migration.md) for credentials,
+network enforcement checks, database ownership, and coordinated upgrades.

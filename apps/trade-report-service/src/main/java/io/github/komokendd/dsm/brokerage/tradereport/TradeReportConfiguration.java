@@ -4,7 +4,7 @@ import io.github.komokendd.dsm.brokerage.common.IdempotentEventStore;
 import io.github.komokendd.dsm.brokerage.common.JpxBusinessCalendar;
 import io.github.komokendd.dsm.brokerage.common.KafkaFactory;
 import io.github.komokendd.dsm.brokerage.schema.ExecutionReportEvent;
-import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
+import org.springframework.boot.kafka.autoconfigure.KafkaProperties;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

@@ -58,7 +58,7 @@ AMD64 and ARM64.
 | Maven build environment | `docker.io/library/maven:3.9.16-eclipse-temurin-21` | Docker Official Image | Used only on the developer machine to build jars. It combines the official Maven distribution with Temurin 21. Its large toolchain surface is not deployed to Kubernetes. The host-side Maven Wrapper uses the same Maven release and verifies the distribution SHA-256. |
 | Java application runtime | `docker.io/library/eclipse-temurin:21.0.13_9-jre-ubi9-minimal` | Docker Official Image maintained by Eclipse Adoptium | Selected for a current Java 21 JRE, TCK-tested Temurin binaries, glibc compatibility, and a small UBI minimal base. It is not distroless, so OS packages remain part of the vulnerability surface and must be refreshed intentionally. Applications run as UID/GID `10001`, not root. |
 | PostgreSQL | `docker.io/library/postgres:17.11-bookworm` | Docker Official Image | Uses the current PostgreSQL 17 minor release rather than a floating `17` tag. The Debian base and database packages remain scan targets. Kubernetes pulls the official image by tag and multi-architecture index digest. |
-| Strimzi Operator and Kafka | `quay.io/strimzi/operator:1.1.0` and `quay.io/strimzi/kafka:1.1.0-kafka-4.2.1` | Official images published by the Strimzi project; not Docker Official Images | Generic Kafka images are not substituted because Strimzi's Operator, scripts, Kafka version map, and entity operators are released and tested together. Digest locking prevents a later tag change from changing the deployed bytes; registry availability and upstream supply-chain security remain vendor dependencies. |
+| Strimzi Operator and Kafka | `quay.io/strimzi/operator:1.3.1` and `quay.io/strimzi/kafka:1.3.1-kafka-4.2.1` | Official images published by the Strimzi project; not Docker Official Images | Generic Kafka images are not substituted because Strimzi's Operator, scripts, Kafka version map, and entity operators are released and tested together. Digest locking prevents a later tag change from changing the deployed bytes; registry availability and upstream supply-chain security remain vendor dependencies. |
 | Datadog Operator, Agent, Cluster Agent, Java tracer, and APM injector | `registry.datadoghq.com/*` | Official vendor images published by Datadog; not Docker Official Images | These images implement the Datadog Operator contract, telemetry collection, admission injection, and tracer installation. Replacing them with generic images is not meaningful. Kubernetes uses the vendor registry directly with multi-architecture index digests. The APM injector is pinned to `0.66.0`, the first release containing the fix for CVE-2026-61581. |
 | kind node | `docker.io/kindest/node:v1.35.0` | Official image published by the kind project; not a Docker Official Image | This image is the Kubernetes node implementation expected by kind. It runs a privileged local control-plane container and is appropriate only for the local development cluster, never for EKS workloads. |
 | EKS system add-ons | Regional AWS-owned ECR repositories | AWS-managed EKS images | VPC CNI, CoreDNS, kube-proxy, EBS CSI, and Pod Identity images remain managed by the EKS add-on service. They use AWS-owned regional ECR repositories rather than the user's ECR, but still use ECR network endpoints and do not require public container registries. |
@@ -80,6 +80,59 @@ The project and vendor image sources are documented here:
 The Datadog APM injector security advisory is:
 
 - <https://github.com/DataDog/datadog-agent/security/advisories/GHSA-h8qx-4jh5-pf43>
+
+## Strimzi JVM security update and existing clusters
+
+The lock uses the November 19, 2026 security respins of Strimzi 1.3.1 and
+`1.3.1-kafka-4.2.1`, retaining Kafka 4.2.1. These differ from the original
+November 4 release digests. Both Linux AMD64 and ARM64 Operator and Kafka images
+were run with networking disabled: all four report Red Hat OpenJDK
+`21.0.13.1+2` and `java-21-openjdk-headless-21.0.13.1.2-1.2.el9`, the RHEL 9
+fixed package identified in RHSA-2026:100567 for CVE-2026-114938. Version 1.1.0
+images remain unpatched. No custom replacement JVM image is required.
+
+The CRDs and Operator Helm chart are pinned together by `STRIMZI_CHART_DIGEST`.
+Helm does not upgrade installed CRDs automatically. The deployment scripts first
+run `scripts/strimzi-crd-preflight plan <expected-context>`, then explicitly apply
+the same locked chart's CRDs before upgrading the Operator. The helper uses
+server-side dry-run before every apply and stops on validation, authorization,
+or field ownership conflicts; it never forces conflicts. A failed apply can
+leave some CRDs updated, so resolve the cause before resuming the Operator
+upgrade. The preflight validates CRD definitions, not every stored custom
+resource or every reconciliation outcome.
+
+Before upgrading an existing environment, review the Strimzi 1.2/1.3 release
+changes, back up custom resources and persistent data, inventory **all** Strimzi
+clusters in the Kubernetes cluster, and arrange a maintenance window. These are
+cluster-wide CRD changes. The repository scopes its Operator to the selected
+application namespace (plus its own operator namespace); changing that scope on
+an existing installation stops reconciliation of previously watched namespaces.
+Review any foreign clusters before changing an existing shared installation.
+Kubernetes 1.32 or later is required. Existing resources must already use the Strimzi `v1`
+API; installations predating 1.0 need the separate official API conversion
+procedure before using this update. Resolve custom CRD field ownership with the
+owning operator rather than bypassing conflicts. Existing clusters also need
+review of 1.2's restricted security contexts and service account token mounting
+changes. The repository's kind 1.35 and EKS 1.36 targets meet the new Kubernetes
+minimum.
+
+Keep Kafka `spec.kafka.version` at 4.2.1 through this change; do not increase its
+metadata version as part of the JVM patch. After the authorized rollout, verify
+the actual Operator, Topic/User Operators and every broker image ID and JVM,
+and run the order and notification round trip plus network isolation smoke
+checks. Image inspection here does not prove that an existing cluster has been
+patched. Do not roll the Operator or CRDs back blindly: the older Operator may
+not understand upgraded CRDs or generated resources, and the old image restores
+the vulnerable JVM. Restore a reviewed compatible complete release and backup
+following the official Strimzi downgrade guidance.
+
+Sources: [Strimzi 1.3.1 release](https://github.com/strimzi/strimzi-kafka-operator/releases/tag/1.3.1),
+[Strimzi upgrades](https://strimzi.io/docs/operators/1.3.1/deploying.html#assembly-upgrade-str),
+[Helm CRD limitations](https://helm.sh/docs/chart_best_practices/custom_resource_definitions/),
+[Red Hat CVE status](https://access.redhat.com/security/cve/cve-2026-114938),
+[Red Hat security advisory](https://access.redhat.com/errata/RHSA-2026:100567),
+[Operator tag history](https://quay.io/api/v1/repository/strimzi/operator/tag/?specificTag=1.3.1),
+[Kafka tag history](https://quay.io/api/v1/repository/strimzi/kafka/tag/?specificTag=1.3.1-kafka-4.2.1).
 
 ## Application release provenance
 

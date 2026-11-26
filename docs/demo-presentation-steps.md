@@ -112,21 +112,33 @@ that their orders filled or expired.
   first; after about 40 seconds notifications reach the DLT.
 - **Push gateway · requests by result** switches to `unavailable`.
 - Undelivered notifications grow by about 4 per second.
-- **Unresolved notification dead letters · now** keeps growing while the
+- **Redrive 待ちの通知 DLT · 現在** keeps growing while the
   outage lasts (265 in the verification run) and the
   **Unresolved notification dead letters** monitor alerts.
 - In DSM, the two retry topics and the DLT gain throughput, and the
   `exception-management-service` DLT consumer appears on the map.
-- **Notification dead letters · customers not yet notified** in
-  **3 · Orders Requiring Attention** lists the affected orders.
+- **通知 DLT の発生履歴 · 解決済みを含む** in
+  **3 · Orders Requiring Attention** lists historical affected orders. Delivered
+  notifications remain in this history; it is not a current unresolved list.
 
 **Recovery and redrive:** run **ベースラインに戻す** first so the push provider
 is healthy, then **未達通知の再送 (Redrive)**. The CLI prints the
-result, for example `{"redrivenCount":265,...}`. Unresolved dead letters and
-undelivered notifications return to zero within about 12 seconds, and the
-push gateway's `duplicate` result does not increase: each customer receives
-each notification exactly once because the provider deduplicates by
-`notification_id`. Redriving while the provider is still down only sends the
+result, for example `{"redrivenCount":100,"remainingCount":165,...}`. Each call
+queues a bounded batch (default: up to 100 records with a five-second Kafka
+send budget and a 15-second database transaction timeout). Repeat
+while `remainingCount` is greater than zero; concurrent calls select separate
+batches. If a batch fails or times out, database changes for that batch roll
+back, and a subsequent call can retry it. Already acknowledged Kafka writes
+can still be delivered, so notification identity remains stable. The dead-letter count decreases
+when records are queued for retry, before delivery is confirmed. Confirm the
+delivery counter increases and the execution-notification pending gauge drains;
+that gauge does not include expiry notifications. Follow the order's delivery
+logs for both execution and expiry notifications. `GET /internal/exceptions`
+provides the current Redrive-waiting records through authenticated operator
+access. In the earlier verification run, delivery drained within about 12
+seconds. The simulated provider deduplicates `notification_id` within its
+in-memory bounded window; it does not guarantee lifetime exactly-once delivery
+across provider restarts. Redriving while the provider is still down sends
 notifications through the retry topics to the DLT again.
 
 ### 4. Recovery

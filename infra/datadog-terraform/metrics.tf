@@ -63,7 +63,7 @@ resource "datadog_metric_metadata" "notification_dead_letter_oldest_unresolved_a
   metric      = "demo.brokerage.notifications.dead_letter.oldest_unresolved_age"
   type        = "gauge"
   short_name  = "最古の未解決通知デッドレター"
-  description = "未配信のお客様向け通知のうち、DLT に入ってからの滞留時間が最も長いもの。"
+  description = "Redrive を待つ通知のうち、DLT に入ってからの滞留時間が最も長いもの。再試行トピックに戻すと解消し、配信完了を示すものではありません。"
   unit        = "second"
 }
 

@@ -8,6 +8,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableScheduling
 public class OrderStateServiceApplication {
     public static void main(String[] args) {
+        if (io.github.komokendd.dsm.brokerage.common.DatabaseMigrations.runIfRequested()) return;
         SpringApplication.run(OrderStateServiceApplication.class, args);
     }
 }

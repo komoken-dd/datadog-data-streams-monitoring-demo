@@ -53,7 +53,16 @@ class BuyingPowerLedger {
         }
         var reservation = repository.lockReservation(execution.getOrderId()).orElse(null);
         if (reservation == null) {
-            LOG.warn("Execution for an order without a reservation; applying cash and shares only");
+            throw new IllegalStateException("Execution has no known reservation; reconciliation required");
+        }
+        if (!reservation.accountId().equals(execution.getAccountId())
+                || !reservation.symbol().equals(execution.getSymbol())) {
+            throw new IllegalArgumentException("Execution identity does not match reservation");
+        }
+        if (execution.getQuantity() != reservation.quantity()
+                || execution.getCumulativeQuantity() != reservation.reflectedQuantity() + execution.getExecutedQuantity()
+                || execution.getLeavesQuantity() != reservation.quantity() - execution.getCumulativeQuantity()) {
+            throw new IllegalArgumentException("Execution progress is missing or inconsistent");
         }
         var delta = BuyingPowerRules.fill(
                 Side.parse(execution.getSide()),
@@ -83,6 +92,13 @@ class BuyingPowerLedger {
         if (reservation == null) {
             LOG.warn("Expiry for an order without a reservation; nothing to release");
         }
+        if (reservation == null || !reservation.accountId().equals(expiry.getAccountId())
+                || !reservation.symbol().equals(expiry.getSymbol())
+                || !reservation.side().name().equals(expiry.getSide())
+                || expiry.getQuantity() != reservation.quantity()
+                || expiry.getCumulativeQuantity() + expiry.getExpiredQuantity() != reservation.quantity()) {
+            throw new IllegalArgumentException("Expiry does not match reservation");
+        }
         return apply(
                 expiry.getAccountId(),
                 expiry.getOrderId(),
@@ -92,7 +108,7 @@ class BuyingPowerLedger {
                 expiry.getEventId(),
                 expiry.getEventType(),
                 expiry.getExpiredAt(),
-                BuyingPowerRules.releaseRemaining(reservation));
+                BuyingPowerRules.expire(reservation, expiry.getExpiredQuantity()));
     }
 
     private Optional<BuyingPowerUpdatedEvent> apply(
@@ -106,8 +122,7 @@ class BuyingPowerLedger {
             Instant sourceOccurredAt,
             LedgerDelta delta) {
         if (!repository.applyToAccount(accountId, delta)) {
-            LOG.warn("Event for an unknown account skipped");
-            return Optional.empty();
+            throw new IllegalStateException("Event account is unknown; reconciliation required");
         }
         repository.applyToSellable(accountId, symbol, delta);
         repository.applyToReservation(orderId, delta);

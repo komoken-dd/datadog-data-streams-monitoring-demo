@@ -11,16 +11,73 @@ if [[ -z "${action}" ]]; then
 fi
 
 require_command terraform
+require_command python3
+umask 077
+
+# Additional CLI arguments can override var files or select another backend.
+# Keep the wrapper's reviewed inputs authoritative.
+for name in $(compgen -e | sed -n '/^TF_CLI_ARGS/p') TF_WORKSPACE; do
+  [[ -z "${!name:-}" ]] || die "Unset ${name}; this wrapper selects its inputs and backend explicitly."
+done
+[[ $# -eq 1 ]] || die "Pass one action only; configure the target with BROKERAGE_DEMO_TF_STATE and BROKERAGE_DEMO_TFVARS."
 
 readonly terraform_dir="${PROJECT_ROOT}/infra/datadog-terraform"
-readonly data_dir="${terraform_dir}/.terraform"
+readonly guard="${PROJECT_ROOT}/scripts/terraform-plan-guard.py"
+readonly state_file="$(python3 "${guard}" canonical "${BROKERAGE_DEMO_TF_STATE:-${terraform_dir}/.terraform-state/terraform.tfstate}")"
+readonly var_file="$(python3 "${guard}" canonical "${BROKERAGE_DEMO_TFVARS:-${terraform_dir}/local.auto.tfvars}")"
+readonly scope="$(python3 "${guard}" scope "${state_file}")"
+readonly data_dir="${terraform_dir}/.terraform-profiles/${scope}"
 readonly test_data_dir="${terraform_dir}/.terraform-test"
-readonly plan_dir="${terraform_dir}/.terraform-plans"
+readonly plan_dir="${terraform_dir}/.terraform-plans/${scope}"
 readonly plan_file="${plan_dir}/brokerage-demo.tfplan"
 readonly destroy_plan_file="${plan_dir}/brokerage-demo-destroy.tfplan"
-readonly state_file="${BROKERAGE_DEMO_TF_STATE:-${terraform_dir}/.terraform-state/terraform.tfstate}"
-readonly var_file="${BROKERAGE_DEMO_TFVARS:-${terraform_dir}/local.auto.tfvars}"
 export TF_DATA_DIR="${data_dir}"
+
+# Backend initialization changes local metadata; serialize it with planning and
+# applying, including between processes using different tfvars for the same state.
+mkdir -p "${terraform_dir}/.terraform-profiles"
+lock_dir="${terraform_dir}/.terraform-profiles/${scope}.lock"
+[[ "${action}" != test ]] || lock_dir="${terraform_dir}/.terraform-profiles/tests.lock"
+mkdir "${lock_dir}" 2>/dev/null || die "Another Terraform operation holds ${lock_dir}. Remove it only after confirming that process has stopped."
+trap 'plan_guard_exit_status=$?; rmdir "${lock_dir}" || true; exit "${plan_guard_exit_status}"' EXIT
+
+plan_guard() {
+  local operation="$1" kind="$2" file="$3"
+  python3 "${guard}" "${operation}" "${terraform_dir}" "${state_file}" "${var_file}" "${DD_SITE}" "${kind}" "${file}" "${file}.json"
+}
+
+create_plan() {
+  local kind="$1" file="$2"
+  local -a arguments=(-input=false)
+  [[ "${kind}" != destroy ]] || arguments+=(-destroy)
+  mkdir -p "${plan_dir}"
+  # A failed replacement must never leave a previous approved plan usable.
+  rm -f -- "${file}" "${file}.json"
+  terraform -chdir="${terraform_dir}" plan "${arguments[@]}" \
+    -var-file="${var_file}" -out="${file}"
+  if ! terraform -chdir="${terraform_dir}" show -json "${file}" | plan_guard record "${kind}" "${file}"; then
+    rm -f -- "${file}" "${file}.json"
+    die "Plan verification failed; no applicable plan was retained."
+  fi
+  echo "Saved ${kind} plan: ${file}"
+}
+
+apply_plan() {
+  local kind="$1" file="$2"
+  require_tfvars
+  require_nonempty DD_SITE
+  [[ -f "${file}" && -f "${file}.json" ]] || die "Missing saved ${kind} plan and identity manifest. Generate and review a plan for the selected state first."
+  plan_guard verify "${kind}" "${file}"
+  initialize
+  preflight
+  # Consume before applying. A failed/partial apply needs a fresh reviewed plan.
+  mv -- "${file}" "${file}.applying"
+  rm -f -- "${file}.json"
+  local status=0
+  terraform -chdir="${terraform_dir}" apply -input=false "${file}.applying" || status=$?
+  rm -f -- "${file}.applying"
+  return "${status}"
+}
 
 initialize() {
   mkdir -p "$(dirname "${state_file}")" "${data_dir}"
@@ -64,20 +121,10 @@ case "${action}" in
   plan)
     initialize
     preflight
-    mkdir -p "${plan_dir}"
-    terraform -chdir="${terraform_dir}" plan \
-      -var-file="${var_file}" \
-      -out="${plan_file}"
-    echo "Saved plan: ${plan_file}"
+    create_plan update "${plan_file}"
     ;;
   apply)
-    initialize
-    preflight
-    if [[ ! -f "${plan_file}" ]]; then
-      echo "Missing saved plan: ${plan_file}. Run the plan action first." >&2
-      exit 1
-    fi
-    terraform -chdir="${terraform_dir}" apply "${plan_file}"
+    apply_plan update "${plan_file}"
     ;;
   output)
     initialize
@@ -86,25 +133,14 @@ case "${action}" in
   destroy-plan)
     initialize
     preflight
-    mkdir -p "${plan_dir}"
-    terraform -chdir="${terraform_dir}" plan \
-      -destroy \
-      -var-file="${var_file}" \
-      -out="${destroy_plan_file}"
-    echo "Saved destroy plan: ${destroy_plan_file}"
+    create_plan destroy "${destroy_plan_file}"
     ;;
   destroy-apply)
-    initialize
-    preflight
     if [[ "${CONFIRM_DATADOG_DESTROY:-}" != "brokerage-demo" ]]; then
       echo "Refusing to destroy: set CONFIRM_DATADOG_DESTROY=brokerage-demo." >&2
       exit 1
     fi
-    if [[ ! -f "${destroy_plan_file}" ]]; then
-      echo "Missing saved destroy plan: ${destroy_plan_file}. Run destroy-plan first." >&2
-      exit 1
-    fi
-    terraform -chdir="${terraform_dir}" apply "${destroy_plan_file}"
+    apply_plan destroy "${destroy_plan_file}"
     ;;
   *)
     echo "Unknown action: ${action}" >&2

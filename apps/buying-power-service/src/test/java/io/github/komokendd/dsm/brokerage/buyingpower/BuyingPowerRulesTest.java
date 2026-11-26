@@ -60,12 +60,12 @@ class BuyingPowerRulesTest {
         released = released.add(first.releasedAmountJpy());
 
         var second = BuyingPowerRules.fill(Side.BUY, reservation, 100, 100, Jpy.of(280_000));
-        assertThat(second.releasedAmountJpy()).isEqualByComparingTo("333333");
+        assertThat(second.releasedAmountJpy()).isEqualByComparingTo("333334");
         reservation = applied(reservation, second);
         released = released.add(second.releasedAmountJpy());
 
         var last = BuyingPowerRules.fill(Side.BUY, reservation, 100, 0, Jpy.of(280_000));
-        assertThat(last.releasedAmountJpy()).isEqualByComparingTo("333335");
+        assertThat(last.releasedAmountJpy()).isEqualByComparingTo("333334");
         assertThat(last.reservationStatus()).isEqualTo(Status.CONSUMED);
         released = released.add(last.releasedAmountJpy());
 
@@ -128,13 +128,12 @@ class BuyingPowerRulesTest {
                 BuyingPowerRules.releaseRemaining(buyReservation(100, "280000")));
 
         var again = BuyingPowerRules.releaseRemaining(released);
-        var lateFill = BuyingPowerRules.fill(Side.BUY, released, 100, 0, Jpy.of(280_000));
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                BuyingPowerRules.fill(Side.BUY, released, 100, 0, Jpy.of(280_000)))
+                .isInstanceOf(IllegalArgumentException.class);
 
         assertThat(again.reservedDeltaJpy()).isEqualByComparingTo("0");
         assertThat(again.reservationStatus()).isEqualTo(Status.RELEASED);
-        assertThat(lateFill.reservedDeltaJpy()).isEqualByComparingTo("0");
-        assertThat(lateFill.cashDeltaJpy()).isEqualByComparingTo("-280000");
-        assertThat(lateFill.reservationStatus()).isEqualTo(Status.RELEASED);
     }
 
     @Test

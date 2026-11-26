@@ -47,17 +47,31 @@ fi
 kind export kubeconfig --name "${CLUSTER_NAME}"
 kubectl config use-context "${EXPECTED_CONTEXT}" >/dev/null
 require_exact_context "${EXPECTED_CONTEXT}"
+if kubectl -n kube-system get daemonset kindnet >/dev/null 2>&1; then
+  die "This existing cluster uses kindnet, which does not enforce NetworkPolicy. Preserve any needed data and create a separate Cilium-backed kind environment; no cluster is deleted automatically. See docs/security-and-migration.md."
+fi
+helm upgrade --install cilium oci://quay.io/cilium/charts/cilium \
+  --version 1.20.5 --namespace kube-system \
+  --set operator.replicas=1 --set ipam.mode=kubernetes \
+  --set kubeProxyReplacement=false \
+  --set 'policyCIDRMatchMode[0]=nodes' --set rollOutCiliumPods=true \
+  --set image.useDigest=true --set operator.image.useDigest=true \
+  --wait --timeout 5m
 kubectl wait node --all --for=condition=Ready --timeout=2m
+bash "${PROJECT_ROOT}/scripts/verify-network-provider"
 
+bash "${PROJECT_ROOT}/scripts/strimzi-crd-preflight" plan "${EXPECTED_CONTEXT}"
+# The scoped Strimzi chart creates RoleBindings in the watched namespace.
+kubectl create namespace "${BROKERAGE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 kubectl create namespace strimzi-system --dry-run=client -o yaml | kubectl apply -f -
+bash "${PROJECT_ROOT}/scripts/strimzi-crd-preflight" apply "${EXPECTED_CONTEXT}"
 helm upgrade --install strimzi-kafka-operator \
-  oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version "${STRIMZI_CHART_VERSION}" \
+  "oci://quay.io/strimzi-helm/strimzi-kafka-operator@${STRIMZI_CHART_DIGEST}" \
   --namespace strimzi-system \
-  --set watchAnyNamespace=true \
+  --set watchAnyNamespace=false \
+  --set-string "watchNamespaces[0]=${BROKERAGE_NAMESPACE}" \
   --set-string "image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
   --set-string "image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
-  --set-string "kafka.image.digest=${STRIMZI_KAFKA_IMAGE_INDEX_DIGEST}" \
   --set-string "topicOperator.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
   --set-string "topicOperator.image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
   --set-string "userOperator.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
@@ -80,5 +94,4 @@ helm upgrade --install datadog-operator datadog/datadog-operator \
   --wait \
   --timeout 5m
 
-kubectl create namespace "${BROKERAGE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 echo "kind cluster and required operators are ready."

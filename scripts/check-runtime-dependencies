@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Check resolved CycloneDX Maven components against OSV; fail closed on errors."""
+import argparse
+import datetime as dt
+import json
+from pathlib import Path
+import sys
+import urllib.error
+import urllib.request
+from urllib.parse import unquote
+
+
+def maven_coordinates(bom):
+    result = set()
+    for component in bom.get('components', []):
+        purl = component.get('purl', '')
+        if not purl.startswith('pkg:maven/'):
+            continue
+        package, sep, version = purl[len('pkg:maven/'):].partition('@')
+        if not sep or '/' not in package:
+            raise ValueError('Maven component lacks an exact package/version')
+        group, artifact = package.split('/', 1)
+        result.add((unquote(group) + ':' + unquote(artifact), unquote(version.split('?', 1)[0])))
+    if not result:
+        raise ValueError('SBOM contains no resolved Maven runtime components')
+    return sorted(result)
+
+
+def checked_exceptions(path, today):
+    result = {}
+    for entry in json.loads(path.read_text())['exceptions']:
+        for required in ('package', 'version', 'advisory', 'reason', 'owner', 'expires'):
+            if not entry.get(required):
+                raise ValueError('Every security exception needs package, version, advisory, reason, owner, expiry')
+        if dt.date.fromisoformat(entry['expires']) < today:
+            raise ValueError('Expired security exception: ' + entry['advisory'])
+        key = (entry['package'], entry['version'], entry['advisory'])
+        if key in result:
+            raise ValueError('Duplicate security exception: ' + entry['advisory'])
+        result[key] = entry
+    return result
+
+
+def query_osv(coordinates):
+    query = {'queries': [
+        {'package': {'ecosystem': 'Maven', 'name': package}, 'version': version}
+        for package, version in coordinates
+    ]}
+    request = urllib.request.Request(
+        'https://api.osv.dev/v1/querybatch', data=json.dumps(query).encode(),
+        headers={'Content-Type': 'application/json', 'User-Agent': 'brokerage-demo-dependency-check'},
+    )
+    with urllib.request.urlopen(request, timeout=45) as response:
+        result = json.load(response)['results']
+    if len(result) != len(coordinates):
+        raise ValueError('OSV returned an incomplete response')
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('sbom', type=Path)
+    parser.add_argument('--exceptions', type=Path,
+                        default=Path(__file__).resolve().parents[1] / 'config/security-exceptions.json')
+    parser.add_argument('--output', type=Path)
+    args = parser.parse_args()
+    try:
+        coordinates = maven_coordinates(json.loads(args.sbom.read_text()))
+        exceptions = checked_exceptions(args.exceptions, dt.datetime.now(dt.timezone.utc).date())
+        findings = []
+        for offset in range(0, len(coordinates), 500):
+            batch = coordinates[offset:offset + 500]
+            for (package, version), result in zip(batch, query_osv(batch), strict=True):
+                for vulnerability in result.get('vulns', []):
+                    advisory = vulnerability['id']
+                    exception = exceptions.get((package, version, advisory))
+                    findings.append({'package': package, 'version': version, 'advisory': advisory,
+                                     'exception': exception})
+        if args.output:
+            args.output.write_text(json.dumps({'packages': len(coordinates), 'findings': findings}, indent=2))
+        for finding in findings:
+            state = 'EXCEPTION' if finding['exception'] else 'FAIL'
+            print(f'{state}: {finding["package"]}@{finding["version"]} {finding["advisory"]}')
+        untriaged = sum(not finding['exception'] for finding in findings)
+        print(f'Checked {len(coordinates)} resolved Maven components; {untriaged} untriaged advisory matches.')
+        return 1 if untriaged else 0
+    except (ValueError, KeyError, OSError, urllib.error.URLError) as error:
+        print('Dependency check could not complete: ' + str(error), file=sys.stderr)
+        return 2
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

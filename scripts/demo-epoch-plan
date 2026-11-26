@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Read-only inventory for a deliberate whole-epoch reset. Never deletes or scales."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+APPLICATIONS = {
+    "order-flow-simulator", "order-service", "buying-power-service", "exchange-gateway-simulator",
+    "holdings-service", "trade-report-service", "notification-service", "push-gateway-simulator",
+    "order-state-service", "exception-management-service",
+}
+TOPICS = {
+    "brokerage.orders.accepted.v1", "brokerage.executions.v1", "brokerage.orders.expired.v1",
+    "brokerage.buying-power.updated.v1", "brokerage.trade-reports.issued.v1",
+    "brokerage.notifications.delivered.v1", "brokerage.notifications.retry.5s.v1",
+    "brokerage.notifications.retry.30s.v1", "brokerage.notifications.dlt.v1",
+}
+
+
+def run(arguments, input_text=None):
+    result = subprocess.run(arguments, input=input_text, text=True, capture_output=True, check=True)
+    return result.stdout
+
+
+def inventory(target, runner=run):
+    expected = "kind-brokerage-demo" if target == "kind" else os.environ.get("BROKERAGE_DEMO_EKS_CONTEXT", "")
+    namespace = os.environ.get("BROKERAGE_NAMESPACE", "brokerage-demo")
+    if not expected or not re.fullmatch(r"[a-z0-9](?:[-a-z0-9]*[a-z0-9])?", namespace):
+        raise ValueError("Select BROKERAGE_DEMO_EKS_CONTEXT and a valid demo namespace")
+    if runner(["kubectl", "config", "current-context"]).strip() != expected:
+        raise ValueError("Current Kubernetes context does not match the selected demo target")
+    prefix = ["kubectl", "--context", expected, "--namespace", namespace]
+
+    def get(*args):
+        return json.loads(runner(prefix + ["get", *args, "-o", "json", "--request-timeout=15s"]))
+
+    ns = get("namespace", namespace)
+    workloads = get("deployments,statefulsets,daemonsets,jobs,cronjobs,pods")
+    topics = get("kafkatopics")
+    volumes = get("pvc")
+    blockers = []
+    if ns["metadata"].get("labels", {}).get("app.kubernetes.io/part-of") != "brokerage-demo":
+        blockers.append("Namespace ownership label app.kubernetes.io/part-of=brokerage-demo is missing; review ownership before any reset")
+    for item in workloads["items"]:
+        name, kind = item["metadata"]["name"], item["kind"]
+        allowed = (kind == "Deployment" and (name in APPLICATIONS or name == "brokerage-kafka-entity-operator")
+                   or kind == "StatefulSet" and name == "postgresql"
+                   or kind == "Job" and name.startswith("brokerage-demo-database-roles-"))
+        if kind == "Pod":
+            labels = item["metadata"].get("labels", {})
+            allowed = (labels.get("app.kubernetes.io/name") in APPLICATIONS | {"postgresql", "database-bootstrap"}
+                       or labels.get("strimzi.io/cluster") == "brokerage-kafka")
+        if not allowed:
+            blockers.append(f"Foreign workload requires separate review: {kind}/{name}")
+    actual_topics = {t["spec"].get("topicName", t["metadata"]["name"]) for t in topics["items"]}
+    if actual_topics != TOPICS:
+        blockers.append("KafkaTopic set differs from the exact nine demo topics")
+    if any(t["metadata"].get("labels", {}).get("strimzi.io/cluster") != "brokerage-kafka" for t in topics["items"]):
+        blockers.append("A KafkaTopic belongs to another Kafka cluster")
+    for item in volumes["items"]:
+        if item["metadata"]["name"] not in {"data-postgresql-0", "data-brokerage-kafka-combined-0"}:
+            blockers.append("Foreign PVC requires separate review: " + item["metadata"]["name"])
+    sql = """BEGIN READ ONLY;
+SELECT json_build_object(
+  'database_bytes', pg_database_size(current_database()),
+  'tables', (SELECT json_agg(json_build_object('schema', schemaname, 'table', relname,
+     'estimated_rows', n_live_tup)) FROM pg_stat_user_tables));
+ROLLBACK;
+"""
+    database = runner(prefix + ["exec", "-i", "postgresql-0", "--", "sh", "-c",
+                               'exec psql -v ON_ERROR_STOP=1 -qAt -U "$POSTGRES_USER" -d "$POSTGRES_DB"'], sql)
+    database = json.loads(database.strip())
+    return {
+        "mode": "read-only-plan", "target": target, "context": expected, "namespace": namespace,
+        "namespace_uid": ns["metadata"]["uid"],
+        "ownership_blockers": blockers,
+        "workloads": [{"kind": w["kind"], "name": w["metadata"]["name"], "uid": w["metadata"]["uid"],
+                       "replicas": w.get("spec", {}).get("replicas")} for w in workloads["items"]],
+        "topics": [{"name": t["metadata"]["name"], "uid": t["metadata"]["uid"], "spec": t["spec"]} for t in topics["items"]],
+        "volumes": [{"name": v["metadata"]["name"], "uid": v["metadata"]["uid"],
+                     "volume": v.get("spec", {}).get("volumeName")} for v in volumes["items"]],
+        "database": database,
+        "automatic_reset_available": False,
+        "next_step": "Follow docs/demo-runbook.md#resetting-a-demo-epoch; inspect ownership, stop and drain, back up, then recreate Kafka and database together. This plan does not authorize a reset.",
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("target", choices=("kind", "eks"))
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    result = json.dumps(inventory(args.target), indent=2) + "\n"
+    if args.output:
+        # Inventory contains infrastructure identifiers: private by default.
+        descriptor = os.open(args.output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(descriptor, "w") as output:
+            output.write(result)
+    else:
+        print(result, end="")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (ValueError, OSError, subprocess.CalledProcessError, KeyError) as error:
+        # A failing subprocess may contain sensitive diagnostics. Do not print its output.
+        print(f"Epoch inventory stopped safely: {type(error).__name__}. Check target context, ownership, readiness, and access.", file=sys.stderr)
+        sys.exit(1)

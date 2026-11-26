@@ -2,6 +2,7 @@ package io.github.komokendd.dsm.brokerage.order;
 
 import io.github.komokendd.dsm.brokerage.common.BuyingPowerReservation;
 import java.util.Set;
+import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.MediaType;
@@ -14,7 +15,8 @@ final class HttpBuyingPowerClient implements BuyingPowerClient {
     private static final Set<String> KNOWN_REASONS = Set.of(
             BuyingPowerReservation.INSUFFICIENT_BUYING_POWER,
             BuyingPowerReservation.INSUFFICIENT_SELLABLE_QUANTITY,
-            BuyingPowerReservation.UNKNOWN_ACCOUNT);
+            BuyingPowerReservation.UNKNOWN_ACCOUNT, BuyingPowerReservation.RESERVATION_EXPIRED,
+            BuyingPowerReservation.RESERVATION_CANCELLED);
 
     private final RestClient restClient;
 
@@ -52,14 +54,35 @@ final class HttpBuyingPowerClient implements BuyingPowerClient {
     }
 
     @Override
-    public void release(String orderId) {
+    public ReservationOutcome lookup(String orderId) {
+        try {
+            return restClient.get().uri(BuyingPowerReservation.RESERVATIONS_PATH + "/{orderId}", orderId)
+                    .exchange((request, response) -> {
+                        if (response.getStatusCode().value() == 404) return new Missing();
+                        if (response.getStatusCode().value() != 200) return new Unavailable("Reservation lookup failed");
+                        var body = response.bodyTo(BuyingPowerReservation.Response.class);
+                        if (body != null && BuyingPowerReservation.RESERVED.equals(body.status())
+                                && body.reservedAmountJpy() != null) {
+                            return new Reserved(body.reservedAmountJpy(), body.buyingPowerJpy());
+                        }
+                        return new Unavailable("Reservation is not open");
+                    });
+        } catch (RestClientException exception) {
+            return new Unavailable("Reservation lookup unavailable");
+        }
+    }
+
+    @Override
+    public boolean cancel(String orderId) {
         try {
             restClient.post()
                     .uri(BuyingPowerReservation.RESERVATIONS_PATH + "/{orderId}/release", orderId)
                     .retrieve()
                     .toBodilessEntity();
+            return true;
         } catch (RuntimeException exception) {
-            LOG.error("Compensating buying-power release failed; reservation stays held", exception);
+            LOG.error("Reservation cancellation unconfirmed; durable submission remains pending", exception);
+            return false;
         }
     }
 }

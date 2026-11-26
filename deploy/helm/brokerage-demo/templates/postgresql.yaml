@@ -1,14 +1,5 @@
 {{- if .Values.postgresql.createSecret }}
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ .Values.postgresql.secretName }}
-  labels:
-    {{- include "brokerage-demo.labels" . | nindent 4 }}
-type: Opaque
-stringData:
-  password: {{ .Values.postgresql.password | quote }}
----
+{{- fail "PostgreSQL credentials must be provisioned out of band; do not pass passwords through Helm values" }}
 {{- end }}
 apiVersion: v1
 kind: Service

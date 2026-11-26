@@ -15,8 +15,15 @@ env:
   IMAGE_CREATED: "2026-01-01T00:00:00Z"
 
 jobs:
+  validate:
+    name: Validate released source
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   build-java:
     name: Build and test Java applications
+    needs: validate
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -62,11 +69,20 @@ jobs:
             echo "MAVEN_IMAGE_AMD64 must be pinned by digest." >&2
             exit 1
           fi
-          docker run --rm \
+          sudo apt-get update
+          sudo apt-get install --yes podman
+          podman build --platform linux/amd64 --target java-build \
+            --build-arg BUILDARCH=amd64 \
+            --build-arg "MAVEN_IMAGE=${MAVEN_IMAGE_MULTIARCH}" \
+            --build-arg "JAVA_JDK_AMD64_SHA256=${JAVA_JDK_AMD64_SHA256}" \
+            --build-arg "JAVA_JDK_ARM64_SHA256=${JAVA_JDK_ARM64_SHA256}" \
+            --tag localhost/brokerage-java-build --file apps/Containerfile \
+            --ignorefile apps/.containerignore apps
+          podman run --rm \
             --platform linux/amd64 \
             --volume "${GITHUB_WORKSPACE}/apps:/workspace" \
             --workdir /workspace \
-            "${MAVEN_IMAGE_AMD64}" \
+            localhost/brokerage-java-build \
             mvn -B clean verify
 
       - name: Package application jars
@@ -160,8 +176,8 @@ jobs:
           set -Eeuo pipefail
           source config/container-images.sh
           runtime_image="${JAVA_RUNTIME_IMAGE_MULTIARCH:-}"
-          if [[ ! "${runtime_image}" =~ ^docker\.io/library/eclipse-temurin@sha256:[0-9a-f]{64}$ ]]; then
-            echo "JAVA_RUNTIME_IMAGE_MULTIARCH must pin the Temurin multi-architecture index digest." >&2
+          if [[ ! "${runtime_image}" =~ ^registry\.access\.redhat\.com/ubi9/ubi-minimal@sha256:[0-9a-f]{64}$ ]]; then
+            echo "JAVA_RUNTIME_IMAGE_MULTIARCH must pin the reviewed UBI runtime OS multi-architecture index digest." >&2
             exit 1
           fi
 

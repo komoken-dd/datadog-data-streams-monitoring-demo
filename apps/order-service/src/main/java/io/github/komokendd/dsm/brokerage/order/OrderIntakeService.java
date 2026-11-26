@@ -5,6 +5,15 @@ import io.github.komokendd.dsm.brokerage.common.EventLogContext;
 import io.github.komokendd.dsm.brokerage.common.Instrument;
 import io.github.komokendd.dsm.brokerage.common.Instruments;
 import io.github.komokendd.dsm.brokerage.common.MetricNames;
+import io.github.komokendd.dsm.brokerage.common.JdbcEventOutbox;
+import io.github.komokendd.dsm.brokerage.common.EventIds;
+import io.github.komokendd.dsm.brokerage.common.Topics;
+import org.springframework.transaction.support.TransactionTemplate;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
+import java.util.Optional;
 import io.github.komokendd.dsm.brokerage.common.Side;
 import io.github.komokendd.dsm.brokerage.order.BuyingPowerClient.Rejected;
 import io.github.komokendd.dsm.brokerage.order.BuyingPowerClient.Reserved;
@@ -21,7 +30,6 @@ import java.time.Instant;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 
 /**
  * Order intake: validate, reserve buying power synchronously, then publish.
@@ -31,110 +39,178 @@ final class OrderIntakeService {
     private static final Logger LOG = LoggerFactory.getLogger(OrderIntakeService.class);
     static final String EVENT_TYPE = "ORDER_ACCEPTED";
     static final String INVALID_ORDER = "INVALID_ORDER";
-    static final String BUYING_POWER_UNAVAILABLE = "BUYING_POWER_UNAVAILABLE";
-    static final String ORDER_PUBLISH_FAILED = "ORDER_PUBLISH_FAILED";
     static final String UNKNOWN_TAG = "UNKNOWN";
 
     private final OrderValidator validator = new OrderValidator();
     private final BuyingPowerClient buyingPower;
-    private final OrderEventPublisher publisher;
+    private final OrderSubmissionStore submissions;
+    private final JdbcEventOutbox outbox;
+    private final TransactionTemplate transactions;
     private final MeterRegistry metrics;
     private final Clock clock;
 
-    OrderIntakeService(BuyingPowerClient buyingPower, OrderEventPublisher publisher, MeterRegistry metrics, Clock clock) {
+    OrderIntakeService(BuyingPowerClient buyingPower, MeterRegistry metrics, Clock clock,
+            OrderSubmissionStore submissions, JdbcEventOutbox outbox, TransactionTemplate transactions) {
         this.buyingPower = buyingPower;
-        this.publisher = publisher;
+        this.submissions = submissions;
+        this.outbox = outbox;
+        this.transactions = transactions;
         this.metrics = metrics;
         this.clock = clock;
     }
 
     OrderResult submit(CreateOrderRequest request) {
+        return submit(request, null);
+    }
+
+    OrderResult submit(CreateOrderRequest request, String idempotencyKey) {
         ValidatedOrder order;
         try {
             order = validator.validate(request);
+            if (idempotencyKey != null && !idempotencyKey.matches("[A-Za-z0-9._:-]{1,128}")) {
+                throw new InvalidOrderException("Idempotency-Key must be 1-128 safe identifier characters");
+            }
         } catch (InvalidOrderException exception) {
             return invalid(request, exception.getMessage());
         }
-
-        String orderId = UUID.randomUUID().toString();
-        String eventId = UUID.randomUUID().toString();
-        try (var ignored = EventLogContext.open(
-                        order.accountId(), orderId, eventId, EVENT_TYPE, order.symbol(), order.demoScenarioId())
-                .attribute("side", order.side().name())
-                .attribute("order_type", order.orderType().name())) {
-            var outcome = buyingPower.reserve(new BuyingPowerReservation.Request(
-                    order.accountId(),
-                    orderId,
-                    order.symbol(),
-                    order.side().name(),
-                    order.orderType().name(),
-                    order.quantity(),
-                    order.limitPrice()));
-            return switch (outcome) {
-                case Reserved reserved -> publish(order, orderId, eventId, reserved);
-                case Rejected rejected -> reject(order, 422, rejected.reason(), rejectMessage(rejected.reason()));
-                case Unavailable unavailable -> {
-                    LOG.warn("Buying-power check unavailable: {}", unavailable.detail());
-                    yield reject(order, 503, BUYING_POWER_UNAVAILABLE, "buying power could not be checked; retry later");
-                }
-            };
-        }
-    }
-
-    private OrderResult publish(ValidatedOrder order, String orderId, String eventId, Reserved reserved) {
+        String key = idempotencyKey == null ? UUID.randomUUID().toString() : idempotencyKey;
+        String orderId = EventIds.derived(order.accountId() + ":" + key, "ORDER_ID");
+        String eventId = EventIds.derived(orderId, EVENT_TYPE);
         Instant acceptedAt = clock.instant();
-        BigDecimal reservedAmount = reserved.reservedAmountJpy().setScale(0, RoundingMode.UNNECESSARY);
+        BigDecimal amount = order.side() == Side.BUY
+                ? BuyingPowerReservation.buyReservationAmount(order.instrument(), order.orderType(),
+                        order.limitPrice(), order.quantity()) : BigDecimal.ZERO;
         var event = OrderAcceptedEvent.newBuilder()
-                .setEventId(eventId)
-                .setEventType(EVENT_TYPE)
-                .setEventVersion(1)
-                .setOccurredAt(acceptedAt)
-                .setAccountId(order.accountId())
-                .setOrderId(orderId)
-                .setSymbol(order.symbol())
-                .setSide(order.side().name())
-                .setDemoScenarioId(order.demoScenarioId())
-                .setOrderType(order.orderType().name())
-                .setQuantity(order.quantity())
-                .setLimitPrice(order.limitPrice())
-                .setReservedAmountJpy(reservedAmount)
-                .setAcceptedAt(acceptedAt)
-                .build();
+                .setEventId(eventId).setEventType(EVENT_TYPE).setEventVersion(1).setOccurredAt(acceptedAt)
+                .setAccountId(order.accountId()).setOrderId(orderId).setSymbol(order.symbol())
+                .setSide(order.side().name()).setDemoScenarioId(order.demoScenarioId())
+                .setOrderType(order.orderType().name()).setQuantity(order.quantity()).setLimitPrice(order.limitPrice())
+                .setReservedAmountJpy(amount.setScale(0, RoundingMode.UNNECESSARY)).setAcceptedAt(acceptedAt).build();
         try {
-            publisher.publish(event);
-        } catch (RuntimeException exception) {
-            LOG.error("Accepted order could not be published; releasing the reservation", exception);
-            buyingPower.release(orderId);
-            return reject(order, 503, ORDER_PUBLISH_FAILED, "order could not be accepted; retry later");
+            transactions.execute(status -> submissions.createOrLoad(key, fingerprint(order), event,
+                    acceptedAt.plusSeconds(30)));
+        } catch (OrderSubmissionStore.EpochLimitReachedException limit) {
+            Counter.builder("demo.brokerage.demo_epoch.limit_rejections").register(metrics).increment();
+            return new OrderResult.Failed(429, "DEMO_EPOCH_LIMIT_REACHED",
+                    "stop generation and prepare a new demo epoch before submitting more orders");
+        } catch (OrderSubmissionStore.ConflictingRequestException conflict) {
+            return new OrderResult.Failed(409, "IDEMPOTENCY_KEY_CONFLICT",
+                    "this key already identifies a different order");
         }
-        Counter.builder(MetricNames.ORDERS_ACCEPTED)
-                .tag("symbol", order.symbol())
-                .tag("side", order.side().name())
-                .tag("order_type", order.orderType().name())
-                .register(metrics)
-                .increment();
-        LOG.info("Order accepted, quantity={}, reserved_amount_jpy={}", order.quantity(), reservedAmount.toPlainString());
-        return new OrderResult.Accepted(new OrderResult.AcceptedBody(
-                orderId, eventId, "ACCEPTED", reservedAmount, acceptedAt));
+        return advance(orderId, true);
     }
 
-    private OrderResult reject(ValidatedOrder order, int status, String reason, String message) {
-        countRejected(order.symbol(), order.side().name(), reason);
-        // Called inside the order's log context; relabel the line so rejected orders are searchable.
-        String acceptedType = MDC.get("event_type");
-        MDC.put("event_type", "ORDER_REJECTED");
-        MDC.put("reason", reason);
-        try {
-            LOG.info("Order rejected, reason={}", reason);
-        } finally {
-            MDC.remove("reason");
-            if (acceptedType == null) {
-                MDC.remove("event_type");
+    Optional<OrderResult> status(String orderId) {
+        return submissions.find(orderId).map(this::result);
+    }
+
+    /** Resume only the original durable intent; never create a new order to recover an uncertain one. */
+    OrderResult advance(String orderId, boolean mayReserve) {
+        return transactions.execute(tx -> {
+            var row = submissions.lock(orderId).orElseThrow();
+            if (!row.pending()) return result(row);
+            var event = row.event();
+            try (var ignored = EventLogContext.open(event.getAccountId(), orderId, event.getEventId(),
+                    "ORDER_SUBMISSION", event.getSymbol(), event.getDemoScenarioId())) {
+                if (!clock.instant().isBefore(row.deadline())) {
+                    if (buyingPower.cancel(orderId)) {
+                        submissions.transition(orderId, "CANCELLED", "RESERVATION_DEADLINE_EXCEEDED");
+                        return new OrderResult.Failed(409, "ORDER_CANCELLED",
+                                "reservation did not complete before the acceptance deadline");
+                    }
+                    submissions.transition(orderId, "UNKNOWN", "CANCELLATION_PENDING");
+                    return pending(event);
+                }
+                var outcome = mayReserve && row.state().equals("RESERVING")
+                        ? buyingPower.reserve(new BuyingPowerReservation.Request(event.getAccountId(), orderId,
+                                event.getSymbol(), event.getSide(), event.getOrderType(), event.getQuantity(),
+                                event.getLimitPrice(), row.deadline()))
+                        : buyingPower.lookup(orderId);
+                if (outcome instanceof Reserved reserved) {
+                    if (reserved.reservedAmountJpy().compareTo(event.getReservedAmountJpy()) != 0) {
+                        throw new IllegalStateException("Reservation amount does not match durable order");
+                    }
+                    // The hold exists. Acceptance and the immutable event become durable in
+                    // one local transaction. A broker timeout can never release this hold.
+                    outbox.lockWriter("acceptance:" + event.getAccountId());
+                    outbox.append(event.getEventId(), Topics.ORDERS_ACCEPTED, event.getAccountId(), event);
+                    submissions.transition(orderId, "ACCEPTED", null);
+                    afterCommit(() -> {
+                        Counter.builder(MetricNames.ORDERS_ACCEPTED).tag("symbol", event.getSymbol())
+                                .tag("side", event.getSide()).tag("order_type", event.getOrderType())
+                                .register(metrics).increment();
+                        try (var acceptedLog = EventLogContext.open(event.getAccountId(), orderId, event.getEventId(),
+                                EVENT_TYPE, event.getSymbol(), event.getDemoScenarioId())) {
+                            LOG.info("Order accepted durably, quantity={}, reserved_amount_jpy={}",
+                                    event.getQuantity(), event.getReservedAmountJpy());
+                        }
+                    });
+                    return accepted(event);
+                }
+                if (outcome instanceof Rejected rejected) {
+                    submissions.transition(orderId, "REJECTED", rejected.reason());
+                    countRejected(event.getSymbol(), event.getSide(), rejected.reason());
+                    try (var rejectedLog = EventLogContext.open(event.getAccountId(), orderId, event.getEventId(),
+                            "ORDER_REJECTED", event.getSymbol(), event.getDemoScenarioId())
+                            .attribute("reason", rejected.reason())) {
+                        LOG.info("Order reservation rejected, reason={}", rejected.reason());
+                    }
+                    return new OrderResult.Failed(422, rejected.reason(), rejectMessage(rejected.reason()));
+                }
+                submissions.transition(orderId, "UNKNOWN", "RESERVATION_OUTCOME_PENDING");
+                return pending(event);
+            }
+        });
+    }
+
+    private OrderResult result(OrderSubmissionStore.Submission row) {
+        return switch (row.state()) {
+            case "ACCEPTED" -> accepted(row.event());
+            case "REJECTED" -> new OrderResult.Failed(422, row.reason(), rejectMessage(row.reason()));
+            case "CANCELLED" -> new OrderResult.Failed(409, "ORDER_CANCELLED", "submission cancelled before acceptance");
+            default -> pending(row.event());
+        };
+    }
+
+    private static void afterCommit(Runnable action) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override public void afterCommit() { action.run(); }
+                    });
+        } else {
+            action.run();
+        }
+    }
+
+    private static OrderResult accepted(OrderAcceptedEvent event) {
+        return new OrderResult.Accepted(new OrderResult.AcceptedBody(event.getOrderId(), event.getEventId(),
+                "ACCEPTED", event.getReservedAmountJpy(), event.getAcceptedAt()));
+    }
+
+    private static OrderResult pending(OrderAcceptedEvent event) {
+        return new OrderResult.Pending(new OrderResult.PendingBody(event.getOrderId(), event.getEventId(),
+                "RESERVATION_OUTCOME_PENDING", "UNKNOWN", "/orders/" + event.getOrderId(),
+                "query this submission; do not submit a new order or release its reservation"));
+    }
+
+    private static String fingerprint(ValidatedOrder order) {
+        StringBuilder canonical = new StringBuilder();
+        for (Object value : new Object[] {order.accountId(), order.symbol(), order.side(), order.orderType(),
+                order.quantity(), order.limitPrice(), order.demoScenarioId()}) {
+            if (value == null) {
+                canonical.append('N');
             } else {
-                MDC.put("event_type", acceptedType);
+                String text = value.toString();
+                canonical.append('V').append(text.length()).append(':').append(text);
             }
         }
-        return new OrderResult.Failed(status, reason, message);
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(canonical.toString().getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
     }
 
     OrderResult invalid(CreateOrderRequest request, String message) {
