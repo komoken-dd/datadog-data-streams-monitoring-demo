@@ -65,19 +65,49 @@ spec:
       enabled: true
   override:
     nodeAgent:
+      volumes:
+        - name: brokerage-runner-credentials
+          secret:
+            secretName: {{ .Values.security.runnerSecretName }}
+            defaultMode: 0444
+      containers:
+        agent:
+          volumeMounts:
+            - name: brokerage-runner-credentials
+              mountPath: /etc/datadog-agent/brokerage-credentials
+              readOnly: true
+        private-action-runner:
+          volumeMounts:
+            - name: brokerage-runner-credentials
+              mountPath: /etc/datadog-agent/brokerage-credentials
+              readOnly: true
       image:
         name: {{ .Values.datadog.agentImageName | quote }}
         tag: {{ .Values.datadog.agentImageTag | quote }}
     clusterAgent:
+      volumes:
+        - name: brokerage-runner-credentials
+          secret:
+            secretName: {{ .Values.security.runnerSecretName }}
+            defaultMode: 0444
       replicas: {{ .Values.datadog.clusterAgentReplicas }}
       image:
         name: {{ .Values.datadog.clusterAgentImageName | quote }}
         tag: {{ .Values.datadog.clusterAgentImageTag | quote }}
       containers:
         cluster-agent:
+          volumeMounts:
+            - name: brokerage-runner-credentials
+              mountPath: /etc/datadog-agent/brokerage-credentials
+              readOnly: true
           command:
             - /entrypoint.sh
           args:
             - datadog-cluster-agent
             - start
             - -E=/etc/datadog-agent/privateactionrunner.yaml
+        private-action-runner:
+          volumeMounts:
+            - name: brokerage-runner-credentials
+              mountPath: /etc/datadog-agent/brokerage-credentials
+              readOnly: true

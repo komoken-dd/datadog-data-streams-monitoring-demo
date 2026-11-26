@@ -40,7 +40,7 @@ applications:
     resources: { requests: { cpu: 50m, memory: 192Mi }, limits: { memory: 768Mi } }
   - name: order-service
     http: true
-    database: false
+    database: true
     resources: { requests: { cpu: 75m, memory: 256Mi }, limits: { memory: 768Mi } }
   - name: buying-power-service
     http: true
@@ -51,7 +51,7 @@ applications:
     database: true
     resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 768Mi } }
   - name: holdings-service
-    http: false
+    http: true
     database: true
     resources: { requests: { cpu: 75m, memory: 256Mi }, limits: { memory: 768Mi } }
   - name: trade-report-service
@@ -78,8 +78,8 @@ applications:
 kafka:
   name: brokerage-kafka
   version: "4.2.1"
-  image: quay.io/strimzi/kafka:1.1.0-kafka-4.2.1@sha256:4cdf885bba8b67a637f8565058a8a26ed7115e1c7bdf76d6f32df3cd1aa38503
-  entityOperatorImage: quay.io/strimzi/operator:1.1.0@sha256:0b18356206d5b98888bb1bca6acd389bbb302ecdcb5f7ea697ddfefbe1a653e6
+  image: quay.io/strimzi/kafka:1.3.1-kafka-4.2.1@sha256:713fa9968859d56bfdd4713bce1186c72886f67096d19992cd198d48463c8e95
+  entityOperatorImage: quay.io/strimzi/operator:1.3.1@sha256:55460ee268f7c7108badb50421fcb215cadd2182406c288c4a939744107a7926
   replicas: 1
   partitions: 6
   replicationFactor: 1
@@ -95,7 +95,6 @@ postgresql:
   username: brokerage
   secretName: brokerage-demo-postgresql
   createSecret: false
-  password: ""
   persistence:
     enabled: false
     size: 10Gi
@@ -120,3 +119,10 @@ datadog:
   clusterAgentImageTag: 7.82.3@sha256:fb934c106ef1c27c84f46030c292006bfbebfa850c8a58668dc9b0d1215c9838
   javaTracerImage: registry.datadoghq.com/dd-lib-java-init:v1.69.1@sha256:183a30acef6027881a2c7fd4f78f066412d32eecfa7e84f84b9dd5d0bc807341
   apmInjectorImage: registry.datadoghq.com/apm-inject:0.66.0@sha256:4e6ecdc36bbfb13da98de46797b4a192b511b6195f75a762fd6eb90962e45a06
+
+security:
+  # Generated out of band; no resolved credentials are accepted in Helm values.
+  apiSecretName: brokerage-demo-api-auth
+  runnerSecretName: brokerage-demo-runner-http
+  networkPolicy:
+    enabled: true

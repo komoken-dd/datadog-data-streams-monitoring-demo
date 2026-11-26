@@ -1,0 +1,135 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: brokerage-demo-database-bootstrap
+data:
+  bootstrap.sh: |
+    #!/usr/bin/env bash
+    set -Eeuo pipefail
+    for attempt in {1..60}; do
+      pg_isready -q && break
+      sleep 2
+    done
+    psql -X --quiet --set ON_ERROR_STOP=1 --file=/bootstrap/roles.sql
+  roles.sql: |
+    BEGIN;
+    REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+    {{- range $index, $application := .Values.applications }}
+    {{- if $application.database }}
+    {{- $schema := include "brokerage-demo.databaseSchema" $application }}
+    {{- $runtime := printf "brokerage_%s" $schema }}
+    {{- $migration := printf "%s_migrator" $runtime }}
+    \set service_schema '{{ $schema }}'
+    \set runtime_role '{{ $runtime }}'
+    \set migration_role '{{ $migration }}'
+    \set history_table 'flyway_schema_history_{{ $schema }}'
+    \getenv runtime_password DB_{{ $index }}_RUNTIME_PASSWORD
+    \getenv migration_password DB_{{ $index }}_MIGRATION_PASSWORD
+    SELECT format('CREATE ROLE %I', :'runtime_role') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'runtime_role') \gexec
+    SELECT format('CREATE ROLE %I', :'migration_role') WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = :'migration_role') \gexec
+    SELECT format('ALTER ROLE %I NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS LOGIN PASSWORD %L', :'runtime_role', :'runtime_password') \gexec
+    SELECT format('ALTER ROLE %I NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS LOGIN PASSWORD %L', :'migration_role', :'migration_password') \gexec
+    -- Legacy immutable V1 migrations contain CREATE SCHEMA IF NOT EXISTS. PostgreSQL
+    -- requires database CREATE even when the owner schema already exists. This
+    -- permission belongs only to the init-container migration identity, never runtime.
+    SELECT format('GRANT CREATE ON DATABASE %I TO %I', current_database(), :'migration_role') \gexec
+    SELECT format('CREATE SCHEMA IF NOT EXISTS %I AUTHORIZATION %I', :'service_schema', :'migration_role') \gexec
+    SELECT format('ALTER SCHEMA %I OWNER TO %I', :'service_schema', :'migration_role') \gexec
+    SELECT 'DO $guard$ BEGIN RAISE EXCEPTION ''Conflicting legacy and scoped migration history; inspect before migrating''; END $guard$;'
+      WHERE to_regclass(format('public.%I', :'history_table')) IS NOT NULL
+        AND to_regclass(format('%I.%I', :'service_schema', :'history_table')) IS NOT NULL \gexec
+    -- Move legacy per-service migration history out of public without losing checksums.
+    SELECT format('ALTER TABLE public.%I SET SCHEMA %I', :'history_table', :'service_schema')
+      WHERE to_regclass(format('public.%I', :'history_table')) IS NOT NULL
+        AND to_regclass(format('%I.%I', :'service_schema', :'history_table')) IS NULL \gexec
+    -- Existing volumes retain their business data; ownership changes only within this service schema.
+    SELECT format('ALTER TABLE %I.%I OWNER TO %I', n.nspname, c.relname, :'migration_role')
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = :'service_schema' AND c.relkind IN ('r', 'p') \gexec
+    SELECT format('REVOKE ALL ON SCHEMA %I FROM PUBLIC', :'service_schema') \gexec
+    SELECT format('GRANT USAGE ON SCHEMA %I TO %I', :'service_schema', :'runtime_role') \gexec
+    SELECT format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE %I.%I TO %I', n.nspname, c.relname, :'runtime_role')
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = :'service_schema' AND c.relkind IN ('r', 'p', 'v', 'm') AND c.relname NOT IN (:'history_table', 'epoch_budget') \gexec
+    SELECT format('REVOKE ALL ON TABLE %I.%I FROM %I', :'service_schema', :'history_table', :'runtime_role')
+      WHERE to_regclass(format('%I.%I', :'service_schema', :'history_table')) IS NOT NULL \gexec
+    SELECT format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE %I.epoch_budget FROM %I', :'service_schema', :'runtime_role')
+      WHERE to_regclass(format('%I.epoch_budget', :'service_schema')) IS NOT NULL \gexec
+    SELECT format('GRANT SELECT ON TABLE %I.epoch_budget TO %I', :'service_schema', :'runtime_role')
+      WHERE to_regclass(format('%I.epoch_budget', :'service_schema')) IS NOT NULL \gexec
+    SELECT format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO %I', :'service_schema', :'runtime_role') \gexec
+    SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO %I', :'migration_role', :'service_schema', :'runtime_role') \gexec
+    SELECT format('ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA %I GRANT USAGE, SELECT ON SEQUENCES TO %I', :'migration_role', :'service_schema', :'runtime_role') \gexec
+    {{- end }}
+    {{- end }}
+    COMMIT;
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: brokerage-demo-database-roles-{{ .Release.Revision }}
+spec:
+  backoffLimit: 4
+  activeDeadlineSeconds: 600
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: database-bootstrap
+        app.kubernetes.io/part-of: brokerage-demo
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: roles
+          image: {{ .Values.postgresql.image | quote }}
+          command: ["/bin/bash", "/bootstrap/bootstrap.sh"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: PGHOST
+              value: postgresql
+            - name: PGDATABASE
+              value: {{ .Values.postgresql.database | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgresql.username | quote }}
+            - name: PGCONNECT_TIMEOUT
+              value: "3"
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.secretName }}
+                  key: password
+            {{- range $index, $application := .Values.applications }}
+            {{- if $application.database }}
+            - name: DB_{{ $index }}_RUNTIME_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: brokerage-demo-db-{{ $application.name }}
+                  key: runtime-password
+            - name: DB_{{ $index }}_MIGRATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: brokerage-demo-db-{{ $application.name }}
+                  key: migration-password
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: brokerage-demo-database-bootstrap

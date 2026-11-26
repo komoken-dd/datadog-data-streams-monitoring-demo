@@ -33,6 +33,35 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
+      {{- if .database }}
+      initContainers:
+        - name: database-migrations
+          image: {{ include "brokerage-demo.applicationImage" (dict "root" $ "application" .) | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: BROKERAGE_DEMO_MIGRATE_ONLY
+              value: "true"
+            - name: DATABASE_URL
+              value: "jdbc:postgresql://postgresql:5432/{{ $.Values.postgresql.database }}"
+            - name: DATABASE_USERNAME
+              value: {{ printf "brokerage_%s_migrator" (include "brokerage-demo.databaseSchema" .) | quote }}
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ printf "brokerage-demo-db-%s" .name }}
+                  key: migration-password
+            - name: DATABASE_SCHEMA
+              value: {{ include "brokerage-demo.databaseSchema" . | quote }}
+            - name: DATABASE_RUNTIME_ROLE
+              value: {{ printf "brokerage_%s" (include "brokerage-demo.databaseSchema" .) | quote }}
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+      {{- end }}
       containers:
         - name: {{ .name }}
           {{- $imageReference := get $.Values.image.references .name }}
@@ -49,6 +78,13 @@ spec:
           env:
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: "{{ $.Values.kafka.name }}-kafka-bootstrap:9092"
+            {{- $listenerServices := list "buying-power-service" "exchange-gateway-simulator" "holdings-service" "trade-report-service" "notification-service" "order-state-service" "exception-management-service" }}
+            {{- if has .name $listenerServices }}
+            - name: DEMO_HEALTH_KAFKA_LISTENERS
+              value: "true"
+            - name: MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE
+              value: "readinessState,brokerageKafka"
+            {{- end }}
             - name: DD_ENV
               value: {{ $.Values.environment | quote }}
             - name: DD_SERVICE
@@ -84,6 +120,10 @@ spec:
               value: "http://order-service:8080"
             - name: EXCHANGE_GATEWAY_URL
               value: "http://exchange-gateway-simulator:8080"
+            - name: BUYING_POWER_SERVICE_URL
+              value: "http://buying-power-service:8080"
+            - name: ORDER_STATE_SERVICE_URL
+              value: "http://order-state-service:8080"
             - name: BASELINE_PER_SECOND
               value: {{ $.Values.simulator.baselinePerSecond | quote }}
             - name: OPENING_RUSH_PER_SECOND
@@ -117,25 +157,60 @@ spec:
             - name: PUSH_GATEWAY_URL
               value: "http://push-gateway-simulator:8080"
             {{- end }}
+            - name: BROKERAGE_DEMO_OPERATOR_TOKEN_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.security.apiSecretName }}
+                  key: operator-token-sha256
+            {{- if has .name (list "buying-power-service" "order-state-service") }}
+            - name: BROKERAGE_DEMO_READ_ONLY_TOKEN_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.security.apiSecretName }}
+                  key: simulator-token-sha256
+            {{- end }}
+            {{- $incomingKeys := dict "order-service" "simulator-token" "buying-power-service" "order-token" "exchange-gateway-simulator" "simulator-token" "push-gateway-simulator" "notification-token" }}
+            {{- $incoming := get $incomingKeys .name }}
+            {{- if $incoming }}
+            - name: BROKERAGE_DEMO_ALLOWED_SERVICE_TOKEN_SHA256
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.security.apiSecretName }}
+                  key: {{ printf "%s-sha256" $incoming }}
+            {{- end }}
+            {{- $outgoingKeys := dict "order-flow-simulator" "simulator-token" "order-service" "order-token" "notification-service" "notification-token" }}
+            {{- $outgoing := get $outgoingKeys .name }}
+            {{- if $outgoing }}
+            - name: BROKERAGE_DEMO_CLIENT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.security.apiSecretName }}
+                  key: {{ $outgoing }}
+            {{- end }}
             {{- if .database }}
+            - name: SPRING_FLYWAY_ENABLED
+              value: "false"
             - name: DATABASE_URL
               value: "jdbc:postgresql://postgresql:5432/{{ $.Values.postgresql.database }}"
             - name: DATABASE_USERNAME
-              value: {{ $.Values.postgresql.username | quote }}
+              value: {{ printf "brokerage_%s" (include "brokerage-demo.databaseSchema" .) | quote }}
             - name: DATABASE_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ $.Values.postgresql.secretName }}
-                  key: password
+                  name: {{ printf "brokerage-demo-db-%s" .name }}
+                  key: runtime-password
             {{- end }}
-          {{- if .http }}
           ports:
             - name: http
               containerPort: 8080
-          {{- end }}
           resources:
             {{- toYaml .resources | nindent 12 }}
-          {{- if .http }}
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            failureThreshold: 60
+            periodSeconds: 5
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness
@@ -148,7 +223,6 @@ spec:
               port: http
             initialDelaySeconds: 30
             periodSeconds: 10
-          {{- end }}
 {{- if .http }}
 ---
 apiVersion: v1

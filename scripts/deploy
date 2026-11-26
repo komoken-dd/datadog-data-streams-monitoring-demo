@@ -69,6 +69,7 @@ echo "Datadog site: ${DD_SITE}"
 echo "Datadog Kubernetes Secret: ${datadog_secret_name}"
 echo "DSM full topology: ${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}"
 
+bash "${PROJECT_ROOT}/scripts/verify-network-provider"
 require_datadog_credentials
 
 application_chart="${PROJECT_ROOT}/deploy/helm/brokerage-demo"
@@ -77,6 +78,8 @@ application_helm_args=(
   --values "${PROJECT_ROOT}/deploy/values/values-eks.yaml"
   --values "${application_image_values}"
   --values "${resource_tag_values}"
+  --set-string "security.apiSecretName=${BROKERAGE_DEMO_API_SECRET_NAME:-brokerage-demo-api-auth}"
+  --set-string "security.runnerSecretName=${BROKERAGE_DEMO_RUNNER_SECRET_NAME:-brokerage-demo-runner-http}"
   --set-string "datadog.site=${DD_SITE}"
   --set-string "datadog.secretName=${datadog_secret_name}"
   --set-string "datadog.dsm.orderStateServiceEnabled=${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}"
@@ -91,15 +94,18 @@ if ! kubectl apply --dry-run=server --filename "${storage_class_manifest}" >/dev
   die "StorageClass preflight failed; no deployment changes were made. Existing StorageClass parameters are immutable. See docs/demo-runbook.md#changing-ebs-volume-tags-on-an-existing-environment for migration; resolve any other validation or access error before retrying."
 fi
 
+bash "${PROJECT_ROOT}/scripts/strimzi-crd-preflight" plan "${BROKERAGE_DEMO_EKS_CONTEXT}"
+# The scoped Strimzi chart creates RoleBindings in the watched namespace.
+kubectl create namespace "${BROKERAGE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 kubectl create namespace strimzi-system --dry-run=client -o yaml | kubectl apply -f -
+bash "${PROJECT_ROOT}/scripts/strimzi-crd-preflight" apply "${BROKERAGE_DEMO_EKS_CONTEXT}"
 helm upgrade --install strimzi-kafka-operator \
-  oci://quay.io/strimzi-helm/strimzi-kafka-operator \
-  --version "${STRIMZI_OPERATOR_IMAGE_TAG}" \
+  "oci://quay.io/strimzi-helm/strimzi-kafka-operator@${STRIMZI_CHART_DIGEST}" \
   --namespace strimzi-system \
-  --set watchAnyNamespace=true \
+  --set watchAnyNamespace=false \
+  --set-string "watchNamespaces[0]=${BROKERAGE_NAMESPACE}" \
   --set-string "image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
   --set-string "image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
-  --set-string "kafka.image.digest=${STRIMZI_KAFKA_IMAGE_INDEX_DIGEST}" \
   --set-string "topicOperator.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
   --set-string "topicOperator.image.digest=${STRIMZI_OPERATOR_IMAGE_INDEX_DIGEST}" \
   --set-string "userOperator.image.name=operator:${STRIMZI_OPERATOR_IMAGE_TAG}" \
@@ -122,7 +128,6 @@ helm upgrade --install datadog-operator datadog/datadog-operator \
   --wait \
   --timeout 5m
 
-kubectl create namespace "${BROKERAGE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 # Set BROKERAGE_DEMO_CREATE_K8S_SECRETS=false when Secrets are provisioned externally.
 if [[ "${BROKERAGE_DEMO_CREATE_K8S_SECRETS}" == "true" ]]; then
   apply_datadog_secret datadog "${datadog_secret_name}"
@@ -132,11 +137,13 @@ fi
 if kubectl -n "${BROKERAGE_NAMESPACE}" get secret brokerage-demo-postgresql >/dev/null 2>&1; then
   echo "Preserving the existing PostgreSQL password secret."
 else
+  [[ "${BROKERAGE_DEMO_CREATE_K8S_SECRETS}" == "true" ]] || die "Provision brokerage-demo-postgresql externally before deployment."
   require_nonempty POSTGRES_PASSWORD
-  kubectl -n "${BROKERAGE_NAMESPACE}" create secret generic brokerage-demo-postgresql \
-    --from-literal="password=${POSTGRES_PASSWORD}" \
-    --dry-run=client -o yaml | kubectl apply -f -
+  python3 "${PROJECT_ROOT}/scripts/secret-manifest.py" postgresql "${BROKERAGE_NAMESPACE}" brokerage-demo-postgresql \
+    | kubectl create -f - >/dev/null
 fi
+
+ensure_application_secrets "${BROKERAGE_DEMO_CREATE_K8S_SECRETS}"
 
 helm upgrade --install brokerage-demo "${application_chart}" \
   "${application_helm_args[@]}" \

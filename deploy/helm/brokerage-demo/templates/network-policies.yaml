@@ -1,0 +1,165 @@
+{{- if .Values.security.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: brokerage-demo-default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: brokerage-demo-dns
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: brokerage-demo-application-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: brokerage-demo
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ .Values.kafka.name }}
+      ports:
+        - { protocol: TCP, port: 9092 }
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: postgresql
+      ports:
+        - { protocol: TCP, port: 5432 }
+    # Tracer/DogStatsD use the node-local host ports. These rules carry telemetry only.
+    - to:
+        - ipBlock: { cidr: 10.0.0.0/8 }
+        - ipBlock: { cidr: 172.16.0.0/12 }
+        - ipBlock: { cidr: 192.168.0.0/16 }
+      ports:
+        - { protocol: TCP, port: 8126 }
+        - { protocol: UDP, port: 8125 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: brokerage-demo-postgresql
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: postgresql
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values: [database-bootstrap, order-service, buying-power-service, exchange-gateway-simulator, holdings-service, trade-report-service, order-state-service, exception-management-service]
+      ports:
+        - { protocol: TCP, port: 5432 }
+{{- $flows := dict "order-flow-simulator" (list "order-service" "exchange-gateway-simulator" "buying-power-service" "order-state-service") "order-service" (list "buying-power-service") "notification-service" (list "push-gateway-simulator") }}
+{{- range $caller, $destinations := $flows }}
+{{- range $destination := $destinations }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "flow-%s-to-%s" $caller $destination }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $caller }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $destination }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "allow-%s-from-%s" $destination $caller }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ $destination }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $caller }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+{{- end }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: brokerage-demo-operator-controls
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: brokerage-demo
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.datadog.namespace }}
+      ports:
+        - { protocol: TCP, port: 8080 }
+---
+# Strimzi owns its broker ingress policies; preserve controller/operator traffic.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: brokerage-demo-kafka-egress
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/cluster: {{ .Values.kafka.name }}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              strimzi.io/cluster: {{ .Values.kafka.name }}
+      ports:
+        - { protocol: TCP, port: 9090 }
+        - { protocol: TCP, port: 9091 }
+        - { protocol: TCP, port: 9092 }
+        - { protocol: TCP, port: 9093 }
+    # Strimzi reads broker configuration Secrets through the Kubernetes API.
+    # The service can DNAT to a node/control-plane endpoint; kind Cilium must
+    # enable policyCIDRMatchMode=nodes so these CIDRs include node identities.
+    - to:
+        - ipBlock: { cidr: 10.0.0.0/8 }
+        - ipBlock: { cidr: 172.16.0.0/12 }
+        - ipBlock: { cidr: 192.168.0.0/16 }
+      ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 6443 }
+{{- end }}

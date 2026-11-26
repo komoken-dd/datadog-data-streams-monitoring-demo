@@ -31,7 +31,7 @@ call_control() {
   local path="$3"
   start_port_forward "${service}" "${port}"
   pids+=("${PORT_FORWARD_PID}")
-  curl -fsS -X POST "http://127.0.0.1:${port}${path}"
+  operator_curl -fsS -X POST "http://127.0.0.1:${port}${path}"
   echo
 }
 

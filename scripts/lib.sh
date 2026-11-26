@@ -71,10 +71,8 @@ require_datadog_credentials() {
   require_nonempty DD_SITE
   require_datadog_site "${DD_SITE}"
 
-  if ! curl -fsS \
-    -H "Accept: application/json" \
-    -H "DD-API-KEY: ${DD_API_KEY}" \
-    -H "DD-APPLICATION-KEY: ${DD_APP_KEY}" \
+  require_command python3
+  if ! python3 "${PROJECT_ROOT}/scripts/curl-auth-config.py" datadog | curl -fsS --config - \
     "https://api.${DD_SITE}/api/v2/validate_keys" \
     | jq -e '.status == "ok"' >/dev/null; then
     echo "Refusing to continue: Datadog API/Application Key validation failed for '${DD_SITE}'." >&2
@@ -138,4 +136,42 @@ start_port_forward() {
   kill "${PORT_FORWARD_PID}" 2>/dev/null || true
   echo "Port-forward for ${service} did not become ready." >&2
   return 1
+}
+
+ensure_application_secrets() {
+  local create_secrets="${1:-true}"
+  local secret_name existing service
+  require_command python3
+  secret_name="${BROKERAGE_DEMO_API_SECRET_NAME:-brokerage-demo-api-auth}"
+  existing="$(kubectl -n "${BROKERAGE_NAMESPACE}" get secret "${secret_name}" --ignore-not-found -o name)" || die "Cannot inspect application API Secret."
+  if [[ -z "${existing}" ]]; then
+    [[ "${create_secrets}" == "true" ]] || die "Provision ${secret_name} externally before deployment."
+    python3 "${PROJECT_ROOT}/scripts/secret-manifest.py" api "${BROKERAGE_NAMESPACE}" "${secret_name}" | kubectl create -f - >/dev/null
+  fi
+  local runner_secret="${BROKERAGE_DEMO_RUNNER_SECRET_NAME:-brokerage-demo-runner-http}"
+  if [[ "${create_secrets}" == "true" ]]; then
+    kubectl -n "${BROKERAGE_NAMESPACE}" get secret "${secret_name}" -o json \
+      | python3 "${PROJECT_ROOT}/scripts/runner-credential-secret.py" datadog "${runner_secret}" \
+      | kubectl apply --server-side --field-manager=brokerage-demo-deployer -f - >/dev/null
+  else
+    kubectl -n datadog get secret "${runner_secret}" >/dev/null
+  fi
+  for service in order-service buying-power-service exchange-gateway-simulator holdings-service trade-report-service order-state-service exception-management-service; do
+    secret_name="brokerage-demo-db-${service}"
+    existing="$(kubectl -n "${BROKERAGE_NAMESPACE}" get secret "${secret_name}" --ignore-not-found -o name)" || die "Cannot inspect database runtime Secret."
+    if [[ -z "${existing}" ]]; then
+      [[ "${create_secrets}" == "true" ]] || die "Provision ${secret_name} externally before deployment."
+      python3 "${PROJECT_ROOT}/scripts/secret-manifest.py" database "${BROKERAGE_NAMESPACE}" "${secret_name}" | kubectl create -f - >/dev/null
+    fi
+  done
+}
+
+operator_curl() {
+  if [[ -n "${BROKERAGE_DEMO_OPERATOR_TOKEN:-}" ]]; then
+    python3 "${PROJECT_ROOT}/scripts/curl-auth-config.py" operator | curl --config - --connect-timeout 3 --max-time 60 "$@"
+  else
+    kubectl -n "${BROKERAGE_NAMESPACE}" get secret "${BROKERAGE_DEMO_API_SECRET_NAME:-brokerage-demo-api-auth}" -o json \
+      | python3 "${PROJECT_ROOT}/scripts/curl-auth-config.py" operator \
+      | curl --config - --connect-timeout 3 --max-time 60 "$@"
+  fi
 }

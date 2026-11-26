@@ -80,7 +80,7 @@ locals {
         type        = "run_workflow"
         workflow_id = workflow.id
         title       = "未達通知の再送 (Redrive)"
-        description = "業務影響: 未解決の通知をすべて再送します。通知 ID によりプッシュは冪等なため、同じお客様に二重に通知されることはありません。**ベースラインに戻す** でプッシュ通知事業者が復旧してから実行してください。確認先: 未解決の通知デッドレターがゼロに戻り、配信済み通知が増加します。"
+        description = "業務影響: 未解決の通知を再試行トピックへ戻します。**ベースラインに戻す** でプッシュ通知事業者が復旧してから実行してください。DLT がゼロになっても配信完了ではありません。配信済み通知の増加と約定通知の未配信件数を確認し、失効通知も含む最終結果は注文ログで追跡してください。"
       }
     }],
   )
@@ -303,8 +303,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "未解決の通知デッドレター · 現在"
-        description = "再試行を使い切り、exception-management-service で再送 (Redrive) を待っているお客様向け通知。"
+        title       = "Redrive 待ちの通知 DLT · 現在"
+        description = "再試行を使い切り、exception-management-service で Redrive を待つ通知件数。再試行トピックへ戻すと減少します。配信確認前の通知もあるため、ゼロは配信完了を意味しません。"
         requests = [{
           q          = "sum:demo.brokerage.notifications.dead_letter.unresolved{env:$env.value}"
           aggregator = "last"
@@ -320,8 +320,8 @@ locals {
     {
       definition = {
         type        = "query_value"
-        title       = "最古の未解決通知デッドレター · 現在"
-        description = "未配信の通知のうち、DLT に入ってからの滞留時間が最も長いもの（秒）。"
+        title       = "最古の Redrive 待ち通知 DLT · 現在"
+        description = "Redrive を待つ通知のうち、DLT に入ってからの滞留時間が最も長いもの（秒）。再試行トピックへの再投入で解消し、配信完了を示すものではありません。"
         requests = [{
           q          = "max:demo.brokerage.notifications.dead_letter.oldest_unresolved_age{env:$env.value}"
           aggregator = "last"
@@ -654,7 +654,7 @@ locals {
     {
       definition = {
         type             = "note"
-        content          = "### 全体の影響から個別の注文へ\n以下のリストはすべて、ダッシュボードのタイムピッカーと **order_id**・**account_id** 変数に連動します。両方を `*` のままにすると影響を受けた注文を探せます。口座を 1 つ選ぶとその口座の全注文を、注文を 1 つ選ぶと受付から約定・買付余力・取引報告書・通知までの流れを追跡できます。**現在** と表示されたゲージは現時点の状態を示すため、古い未解決デッドレターを調べる場合はタイムピッカーの期間を広げてください。"
+        content          = "### 全体の影響から個別の注文へ\n以下のリストはすべて、ダッシュボードのタイムピッカーと **order_id**・**account_id** 変数に連動します。両方を `*` のままにすると影響を受けた注文を探せます。口座を 1 つ選ぶとその口座の全注文を、注文を 1 つ選ぶと受付から約定・買付余力・取引報告書・通知までの流れを追跡できます。**現在** と表示されたゲージは現時点の状態です。DLT リストは解決済みも残る発生履歴です。現在の Redrive 待ちは認証付きの `/internal/exceptions` で確認し、配信完了は配信イベントを追跡してください。古い DLT の履歴を調べる場合はタイムピッカーの期間を広げてください。"
         background_color = "gray"
         font_size        = "14"
         text_align       = "left"
@@ -730,7 +730,7 @@ locals {
     {
       definition = {
         type        = "list_stream"
-        title       = "通知デッドレター · まだ通知が届いていないお客様"
+        title       = "通知 DLT の発生履歴 · 解決済みを含む"
         title_size  = "16"
         title_align = "left"
         requests = [{

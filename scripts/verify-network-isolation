@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
+source "${PROJECT_ROOT}/config/container-images.sh"
+target="${1:-}"
+case "${target}" in
+  kind) require_exact_context "${2:-kind-brokerage-demo}" ;;
+  eks) require_nonempty BROKERAGE_DEMO_EKS_CONTEXT; require_exact_context "${BROKERAGE_DEMO_EKS_CONTEXT}" ;;
+  *) die "Usage: scripts/verify-network-isolation <kind|eks>" ;;
+esac
+bash "${PROJECT_ROOT}/scripts/verify-network-provider"
+namespace="brokerage-isolation-test-$$"
+control_pod="brokerage-isolation-control-$$"
+cleanup() {
+  kubectl -n "${BROKERAGE_NAMESPACE}" delete pod "${control_pod}" --wait=false >/dev/null 2>&1 || true
+  kubectl delete namespace "${namespace}" --wait=false >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+image="${POSTGRES_IMAGE_NAME}:${POSTGRES_IMAGE_TAG}@${POSTGRES_IMAGE_INDEX_DIGEST}"
+# Prove the destination services are reachable by an allowed source before
+# interpreting an unrelated source's connection failure as policy enforcement.
+kubectl -n "${BROKERAGE_NAMESPACE}" run "${control_pod}" --restart=Never --image="${image}" \
+  --labels=app.kubernetes.io/name=database-bootstrap,app.kubernetes.io/part-of=brokerage-demo \
+  --command -- /bin/bash -ceu '
+    pg_isready -h postgresql -p 5432 -t 3 -q
+    timeout 3 /bin/bash -c "exec 3<>/dev/tcp/brokerage-kafka-kafka-bootstrap/9092"
+  ' >/dev/null
+for attempt in {1..60}; do
+  phase="$(kubectl -n "${BROKERAGE_NAMESPACE}" get pod "${control_pod}" -o jsonpath='{.status.phase}')"
+  case "${phase}" in
+    Succeeded) break ;;
+    Failed) die "Allowed-source positive control failed; cannot assess isolation." ;;
+  esac
+  sleep 2
+done
+[[ "${phase}" == Succeeded ]] || die "Allowed-source positive control did not complete."
+kubectl create namespace "${namespace}" >/dev/null
+# A fresh namespace has no source-side deny policy: this checks the destination
+# boundary, rather than mistaking DNS failure or source isolation for protection.
+kubectl -n "${namespace}" run probe --restart=Never --image="${image}" \
+  --command -- /bin/bash -ceu "
+    getent hosts postgresql.${BROKERAGE_NAMESPACE}.svc.cluster.local >/dev/null
+    if pg_isready -h postgresql.${BROKERAGE_NAMESPACE}.svc.cluster.local -p 5432 -t 3 -q; then
+      echo 'FAILED: an unrelated namespace can reach the database' >&2; exit 1
+    fi
+    getent hosts brokerage-kafka-kafka-bootstrap.${BROKERAGE_NAMESPACE}.svc.cluster.local >/dev/null
+    if timeout 3 /bin/bash -c 'exec 3<>/dev/tcp/brokerage-kafka-kafka-bootstrap.${BROKERAGE_NAMESPACE}.svc.cluster.local/9092' 2>/dev/null; then
+      echo 'FAILED: an unrelated namespace can reach Kafka' >&2; exit 1
+    fi
+    echo 'Cross-namespace database and Kafka connections denied'
+  " >/dev/null
+for attempt in {1..60}; do
+  phase="$(kubectl -n "${namespace}" get pod probe -o jsonpath='{.status.phase}')"
+  case "${phase}" in
+    Succeeded) kubectl -n "${namespace}" logs probe; exit 0 ;;
+    Failed) kubectl -n "${namespace}" logs probe >&2; die "Network isolation check failed." ;;
+  esac
+  sleep 2
+done
+die "Network isolation probe did not complete."

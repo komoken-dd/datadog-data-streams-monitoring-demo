@@ -57,6 +57,7 @@ else
     "${archive}"
 fi
 
+bash "${PROJECT_ROOT}/scripts/verify-network-provider"
 require_datadog_credentials
 kubectl create namespace datadog --dry-run=client -o yaml | kubectl apply -f -
 # For externally managed Secrets, adapt this local-only deployment step.
@@ -65,10 +66,12 @@ apply_datadog_secret datadog datadog-secret
 kubectl create namespace "${BROKERAGE_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 if ! kubectl -n "${BROKERAGE_NAMESPACE}" get secret brokerage-demo-postgresql >/dev/null 2>&1; then
   local_db_password="$(openssl rand -hex 24)"
-  kubectl -n "${BROKERAGE_NAMESPACE}" create secret generic brokerage-demo-postgresql \
-    --from-literal="password=${local_db_password}"
+  POSTGRES_PASSWORD="${local_db_password}" python3 "${PROJECT_ROOT}/scripts/secret-manifest.py" postgresql "${BROKERAGE_NAMESPACE}" brokerage-demo-postgresql \
+    | kubectl create -f - >/dev/null
   unset local_db_password
 fi
+
+ensure_application_secrets
 
 helm_args=(
   upgrade --install brokerage-demo "${PROJECT_ROOT}/deploy/helm/brokerage-demo"
@@ -76,6 +79,8 @@ helm_args=(
   --create-namespace
   --values "${PROJECT_ROOT}/deploy/values/values-kind.yaml"
   --set-string "datadog.dsm.orderStateServiceEnabled=${BROKERAGE_DEMO_DSM_FULL_TOPOLOGY}"
+  --set-string "security.apiSecretName=${BROKERAGE_DEMO_API_SECRET_NAME:-brokerage-demo-api-auth}"
+  --set-string "security.runnerSecretName=${BROKERAGE_DEMO_RUNNER_SECRET_NAME:-brokerage-demo-runner-http}"
   --set-string "datadog.site=${DD_SITE}"
   --wait
   --timeout 10m

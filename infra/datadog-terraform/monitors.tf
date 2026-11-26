@@ -6,11 +6,11 @@ resource "datadog_monitor" "unresolved_notification_dead_letters" {
     約定通知・失効通知が 5 秒・30 秒の再試行トピックを使い切り、`brokerage.notifications.dlt.v1` に滞留しています。取引自体は記帳済みですが、該当のお客様には注文の約定または失効が通知されていません。
 
     確認事項:
-    - ダッシュボード → 要対応の注文 → 通知デッドレター で、影響を受けた注文と失敗カテゴリを確認する。
+    - ダッシュボード → 要対応の注文 → 通知 DLT の発生履歴 で、影響を受けた注文と失敗カテゴリを確認する。このリストは解決済みを含む履歴で、現在の未解決一覧ではありません。
     - プッシュゲートウェイの結果（`demo.brokerage.push_gateway.requests` の result 別）で、プッシュ通知事業者が復旧していることを確認する。
     - DSM で通知 Pathway の再試行トピックと DLT のスループットを確認する。
 
-    事業者の復旧後、**未達通知の再送 (Redrive)** を実行してください（または `scripts/demo-control <kind|eks> redrive`）。通知は notification_id で冪等なため、再送してもプッシュ通知が重複することはありません。
+    事業者の復旧後、**未達通知の再送 (Redrive)** を実行してください（または `scripts/demo-control <kind|eks> redrive`）。DLT の減少は再試行トピックへの再投入を示します。配信完了は配信済み通知の増加と注文ログで確認してください。事業者が停止したままだと再び DLT に入ります。
   EOT
 
   monitor_thresholds {

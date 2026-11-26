@@ -37,8 +37,8 @@ root = Path(os.environ["TEST_CASE_ROOT"])
 is_preflight = name == "kubectl" and args[:2] == ["apply", "--dry-run=server"]
 read_only = (
     name in ("aws", "curl")
-    or (name == "helm" and args[0] == "template")
-    or (name == "kubectl" and args[:2] in (["config", "current-context"], ["get", "secret"]))
+    or (name == "helm" and args[0] in ("template", "show"))
+    or (name == "kubectl" and ("get" in args or args[:2] == ["config", "current-context"] or "--dry-run=server" in args))
     or is_preflight
     or "--dry-run=client" in args
 )
@@ -47,6 +47,15 @@ with (root / "commands.jsonl").open("a") as log:
 
 if name == "aws" and args[:2] == ["sts", "get-caller-identity"]:
     print("123456789012")
+elif name == "kubectl" and "daemonset" in args:
+    print('{"items":[{"metadata":{"name":"cilium"},"status":{"numberReady":1}}]}')
+elif name == "kubectl" and "get" in args and "secret" in args and "brokerage-demo-postgresql" in args and os.environ.get("TEST_MISSING_POSTGRES_SECRET"):
+    sys.exit(1)
+elif name == "kubectl" and "get" in args and "secret" in args and "json" in args:
+    import base64
+    print(json.dumps({"data":{"operator-token":base64.b64encode(b"a"*64).decode()}}))
+elif name == "helm" and args[:2] == ["show", "crds"]:
+    print("apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata:\n  name: examples.test.invalid")
 elif name == "curl":
     print('{"status":"ok"}')
 elif name == "helm" and args[0] == "template":
@@ -81,7 +90,7 @@ elif is_preflight:
         print("StorageClass parameters: field is immutable", file=sys.stderr)
         sys.exit(1)
 elif name == "kubectl":
-    if args[0] == "apply":
+    if args[0] == "apply" or (args[0] == "create" and "-f" in args):
         sys.stdin.read()
 else:
     raise SystemExit("Unexpected mock command: " + name)
@@ -161,6 +170,20 @@ class ResourceTagsTest(unittest.TestCase):
     def commands(self):
         log = self.work / "commands.jsonl"
         return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+
+    def test_external_secrets_mode_never_creates_missing_admin_secret(self):
+        self.env.update({
+            "BROKERAGE_DEMO_CREATE_K8S_SECRETS": "false",
+            "TEST_MISSING_POSTGRES_SECRET": "true",
+            "POSTGRES_PASSWORD": "test-only-unused-password",
+        })
+        result = self.deploy()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Provision brokerage-demo-postgresql externally", result.stderr)
+        self.assertFalse(any(
+            c["name"] == "kubectl" and c["args"][:2] == ["create", "-f"]
+            for c in self.commands()
+        ))
 
     def assert_stopped_before_mutation(self, result):
         self.assertNotEqual(result.returncode, 0)

@@ -188,6 +188,26 @@ Before deployment:
 Nothing is automatically destroyed. Use the teardown commands in section 10
 when the environment is no longer needed.
 
+The CDK stack manages the VPC CNI add-on with network policy enforcement
+enabled. It uses standard startup mode and explicit application policies;
+network rules can converge after a Pod starts, so authenticated application
+endpoints remain the primary startup access boundary. A previously self-managed
+`aws-node` DaemonSet is adopted with `resolveConflicts: OVERWRITE`. Before an
+existing-cluster upgrade, compare its current CNI settings with the add-on
+configuration and preserve any intentional customization in IaC. Validate the
+network isolation smoke check after rollout; an enabled flag alone is not proof
+that traffic is denied.
+
+The stack also reconciles tags and seven-day retention on the actual EKS
+control-plane and CDK provider Lambda log groups, including groups created by
+earlier deployments. The custom resource verifies the resulting tags and
+retention before succeeding. It preserves unrelated existing tags and retains
+the groups on deletion. Its own Lambda/framework log groups are explicitly
+managed, tagged, and retained for seven days. Review this retention change
+before deployment because older logs become eligible for deletion. Inspect the
+`ManagedServiceLogGroups` stack output during teardown and remove retained
+groups explicitly when their logs are no longer needed.
+
 ## 4. Create AWS infrastructure
 
 The EKS path additionally requires an authenticated AWS CLI plus Node.js and
@@ -524,9 +544,18 @@ scripts/datadog-terraform apply
 
 Keep the same two variables set for every later `plan`, `apply`, `output`, and
 destroy command against that environment. Both example paths are ignored by
-Git. When multiple operators need the same Terraform state, configure an
-encrypted remote backend with access controls and locking instead of using the
-local-state wrapper unchanged.
+Git. The wrapper isolates backend metadata and saved plans by canonical state
+path, serializes operations for each state, and binds each plan to the selected
+tfvars, implicit input files, configuration, site, credential selection, and
+exact plan bytes. Changed inputs or another environment's plan are rejected
+before apply. Every apply attempt consumes the plan, including partial failures;
+generate and review a fresh plan before retrying. Previous shared plan paths
+are no longer accepted. Do not set `TF_CLI_ARGS*` or `TF_WORKSPACE` for this
+wrapper. If an interrupted process leaves a `.lock` directory, confirm that
+process has stopped before removing only that lock directory. When multiple
+operators need the same Terraform state, configure an encrypted remote backend
+with access controls and locking instead of using the local-state wrapper
+unchanged.
 
 ## Optional: show the full DSM consumer topology
 
@@ -567,7 +596,7 @@ scripts/demo-control kind stop
 | `opening-rush` | 60-second pre-open at 25 orders/s, then one opening-auction burst | Returns to baseline automatically |
 | `buying-power-delay` | 2,500 ms extra processing per execution in `buying-power-service` | Until `baseline` |
 | `push-outage` | Push gateway returns 503; notifications move through retries to the DLT | Until `baseline` |
-| `redrive` | Re-sends every unresolved notification dead letter | Immediately; run after `baseline` |
+| `redrive` | Queues one bounded batch of notification dead letters | Repeat until `remainingCount` is zero; run after `baseline` |
 | `sell-off` | 120 seconds of extra `D105` sell orders down to limit-down | Order flow returns to baseline automatically; `D105` stays at limit-down until `baseline` |
 | `stop` | Stops new orders; accepted orders continue | Until `baseline` |
 
@@ -577,6 +606,73 @@ observe in DSM and on the dashboard in each scenario, with approximate values
 from a local run.
 
 Run `stop` after the demonstration to stop new order intake.
+
+## Resetting a demo epoch
+
+An epoch is one consistent set of Kafka topics/consumer offsets, database
+state, and processed-event/order IDs. The order admission budget bounds new
+work in an epoch; reaching it requires deliberate maintenance rather than
+deleting deduplication records. Stop the generator after each presentation to
+avoid using that budget or generating idle telemetry unnecessarily.
+
+Keep compact processed-event and accepted-order IDs for the entire epoch.
+Kafka's seven-day retention is not an exact deletion deadline: active segments
+and cleanup timing can retain older records. Age alone therefore does not prove
+that an ID is safe to forget. Never truncate processed IDs, reset consumer
+offsets, or restore only PostgreSQL while retained Kafka messages remain.
+
+Start with a read-only inventory (the output contains infrastructure identifiers
+and is created with owner-only permissions):
+
+```bash
+scripts/demo-epoch-plan kind --output /private/tmp/brokerage-epoch-before.json
+# EKS instead requires BROKERAGE_DEMO_EKS_CONTEXT and:
+# scripts/demo-epoch-plan eks --output /private/tmp/brokerage-epoch-before-eks.json
+```
+
+This command verifies the selected context, records the namespace/workload/PVC
+identities and topic specifications, and reports estimated table rows and
+database size. Ownership-label gaps, foreign workloads, foreign volumes, or an
+unexpected topic set require review. It never authorizes or executes deletion,
+scaling, or a reset; review other namespaces as well before replacing a whole
+dedicated cluster.
+
+Use this maintenance sequence only after explicitly deciding to discard the
+synthetic epoch:
+
+1. Reserve exclusive operator access. Run `baseline` to recover providers and
+   reflection processing, then `stop`; prevent other clients or workflows from
+   submitting orders while maintenance is in progress. Requeue DLT batches
+   until `remainingCount` reaches zero and verify their delivery. Wait for
+   working orders to fill/expire, all consumer-group lag to drain, pending
+   outboxes and unknown submissions to clear, and open reservations and
+   execution projections to reconcile. Do not blindly release unresolved
+   historical holds to make these checks pass.
+2. Record replica counts and identities from the plan. Stop all ten application
+   deployments, leaving Kafka and PostgreSQL available for final inspection.
+   Confirm the application Pods have terminated and repeat the checks. Save
+   any needed database/Kafka/offset backups as one epoch, using an approved
+   storage backup procedure. Record actual ownership, PVC/PV identities, and
+   retention/deletion behavior before any teardown.
+3. For a dedicated local kind cluster without external/shared storage, explicitly
+   use the teardown commands below and recreate it with the getting-started
+   procedure. Replacing the entire cluster gives both Kafka and PostgreSQL fresh
+   storage and offsets. For EKS, review a whole-environment teardown/reprovision
+   plan and ensure both systems use fresh volumes. Retained old EBS/PVs must
+   never be attached as half of a new epoch. There is deliberately no one-command
+   data deletion script for an existing EKS environment.
+4. Validate migrations, credentials, network isolation, smoke tests, and the
+   empty/new epoch before allowing traffic. Repoint environment-specific
+   dashboards/connections if their target identity changed. Keep admission
+   stopped if any reset step fails. Resume only after finishing the full new
+   epoch, or restoring the complete matching old epoch; a partially reset
+   database/Kafka pair must not be restarted.
+
+Completed detailed exchange rows can be pruned independently only because a
+separate accepted-order ID tombstone now remains. Other synthetic histories and
+dedupe IDs are retained until whole-epoch replacement; no age-based cleanup
+claims to preserve replay correctness. Monitor the admission budget and
+`demo-epoch-plan` storage output, and rotate the epoch before storage pressure.
 
 ## 10. Teardown
 
