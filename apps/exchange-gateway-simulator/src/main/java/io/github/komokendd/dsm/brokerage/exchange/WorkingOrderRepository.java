@@ -28,6 +28,10 @@ class WorkingOrderRepository {
 
     /** Idempotent: a redelivered accepted-order event does not reset the order's progress. */
     boolean insert(WorkingOrder order) {
+        if (jdbc.update("insert into exchange_gateway.accepted_order_ids (order_id, accepted_at)"
+                + " values (?, ?) on conflict do nothing", order.orderId(), Timestamp.from(order.acceptedAt())) == 0) {
+            return false;
+        }
         return jdbc.update(
                         "insert into exchange_gateway.working_orders (" + COLUMNS + ") "
                                 + "values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict (order_id) do nothing",
@@ -52,7 +56,7 @@ class WorkingOrderRepository {
     List<WorkingOrder> loadWorking(int limit) {
         return jdbc.query(
                 "select " + COLUMNS + " from exchange_gateway.working_orders where status = 'WORKING' "
-                        + "order by accepted_at, order_id limit ?",
+                        + "order by accepted_at, order_id limit ? for update",
                 WorkingOrderRepository::map,
                 limit);
     }

@@ -9,7 +9,7 @@ mean, and which deliberate shortcuts affect what you see.
 | Mechanism | What it does here | Where to inspect it |
 |---|---|---|
 | Datadog Java tracer | Automatically instruments HTTP and Kafka, creates APM spans, creates DSM checkpoints, and propagates trace and pathway context | APM and Data Streams Monitoring |
-| OpenTelemetry API | `EventLogContext` adds `account_id`, `order_id`, `event_type`, `symbol`, and the optional `demo_scenario_id` to the active Datadog span | APM span attributes |
+| OpenTelemetry API | `EventLogContext` adds business identifiers to the active span; durable outbox relays create `outbox.publish` spans carrying those identifiers around the actual Kafka send | APM spans and attributes |
 | Micrometer with StatsD registry | Emits bounded `demo.brokerage.*` business metrics and Spring Boot's bound Kafka client metrics through DogStatsD | Dashboard and Metrics Explorer |
 | Spring Observation | Enables Spring Kafka's framework observation hooks and timing | Framework observations; not DSM enablement |
 
@@ -26,7 +26,8 @@ DD_TRACE_OTEL_ENABLED=true
 
 `DD_TRACE_OTEL_ENABLED=true` is required because `EventLogContext` uses
 `Span.current()` from the OpenTelemetry API. It changes attributes on the
-active Datadog span; it does not create a second tracing pipeline.
+active Datadog span. Outbox publication also creates a parent span through that
+same bridge; it does not create a separate telemetry-export pipeline.
 
 `observation-enabled` is independent of DSM. Removing it does not disable DSM,
 and enabling it does not create DSM checkpoints. It remains enabled so the
@@ -37,7 +38,7 @@ Spring Kafka factories expose their standard Observation hooks and timing.
 | Service | HTTP | Kafka consume | Kafka produce | PostgreSQL schema | DSM by default |
 |---|---|---|---|---|---|
 | `order-flow-simulator` | Calls `order-service` and the exchange quote API | | | | Enabled (no Kafka clients) |
-| `order-service` | Serves `POST /orders`; calls `buying-power-service` | | `orders.accepted` | | Enabled |
+| `order-service` | Serves idempotent `POST /orders` and submission inquiry; calls `buying-power-service` | | `orders.accepted` (durable outbox relay) | `order_service` | Enabled |
 | `buying-power-service` | Serves the reservation API | `executions`, `orders.expired` | `buying-power.updated` | `buying_power_service` | Enabled |
 | `exchange-gateway-simulator` | Serves `GET /internal/market/quotes` | `orders.accepted` | `executions`, `orders.expired` (from the matching scheduler) | `exchange_gateway` | Enabled |
 | `holdings-service` | | `executions` | | `holdings_service` | Enabled |
@@ -107,8 +108,8 @@ and expiries. That thread has no active consume span, so:
 - The execution fan-out pathways start at `exchange-gateway-simulator` as their
   origin. `pathway_type:full` latency on the fan-out measures time since the
   exchange published the execution, not since the customer placed the order.
-- An APM trace for an execution starts at the exchange's produce span, not in
-  the customer's `POST /orders` trace.
+- An APM trace for an execution starts at the exchange's outbox relay span and
+  produce span, not in the customer's `POST /orders` trace.
 
 This mirrors a real brokerage, where execution reports arrive from an
 external exchange independently of the order request. To follow one order
@@ -339,3 +340,22 @@ https://docs.datadoghq.com/tracing/trace_collection/dd_libraries/java/
 https://docs.datadoghq.com/metrics/distributions/
 
 https://docs.datadoghq.com/getting_started/tagging/
+
+### Durable acceptance and matching boundaries
+
+Order acceptance and exchange matching commit their immutable Kafka payloads to
+PostgreSQL before a relay sends them. They persist only the append-time W3C
+`traceparent` and `tracestate` (bounded to 128/512 characters) and restore that
+parent on `outbox.publish`, even after restart. Baggage and arbitrary headers
+are excluded. A normal accepted-order relay can therefore continue the HTTP
+trace asynchronously. Rows appended without an active span, old rows, and
+scheduled reconciliation start fresh traces. The exchange matching scheduler
+remains independent of the accepted-order consumer's trace.
+
+Relay spans and logs carry `order_id`, `account_id`, and `event_id` for correlation
+where no parent exists. Stored W3C context does not preserve Datadog's separate
+DSM pathway context; complete causal DSM paths through a durable outbox have
+not been verified. Custom submission pending/outbox age metrics distinguish a
+local relay backlog from Kafka consumer lag. Exact stored payloads are sent
+using `ByteArraySerializer`; no producer-side automatic Avro schema sampling
+is guaranteed for this custom codec.

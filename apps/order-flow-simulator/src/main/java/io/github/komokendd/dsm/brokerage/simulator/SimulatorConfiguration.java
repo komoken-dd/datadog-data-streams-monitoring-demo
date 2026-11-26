@@ -3,6 +3,7 @@ package io.github.komokendd.dsm.brokerage.simulator;
 import java.net.http.HttpClient;
 import java.time.Clock;
 import java.time.Duration;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -30,6 +31,13 @@ class SimulatorConfiguration {
     @Bean
     ExchangeGatewayClient exchangeGatewayClient(RestClient.Builder builder, SimulatorProperties properties) {
         return new ExchangeGatewayClient(client(builder, properties.exchangeGatewayUrl()));
+    }
+
+    @Bean
+    ScenarioAccountClient scenarioAccountClient(RestClient.Builder builder,
+            @Value("${BUYING_POWER_SERVICE_URL:http://buying-power-service:8080}") String buyingPowerUrl,
+            @Value("${ORDER_STATE_SERVICE_URL:http://order-state-service:8080}") String stateUrl) {
+        return new ScenarioAccountClient(client(builder, buyingPowerUrl), client(builder, stateUrl));
     }
 
     private static RestClient client(RestClient.Builder builder, String baseUrl) {

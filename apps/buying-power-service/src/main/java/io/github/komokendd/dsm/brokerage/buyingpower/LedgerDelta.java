@@ -20,5 +20,13 @@ record LedgerDelta(
         long sellableReservedDelta,
         BigDecimal releasedAmountJpy,
         long releasedQuantity,
-        ReservationState.Status reservationStatus) {
+        ReservationState.Status reservationStatus,
+        long reflectedQuantityDelta,
+        Long expiredQuantity) {
+    LedgerDelta(BigDecimal cashDeltaJpy, BigDecimal reservedDeltaJpy, long sellableQuantityDelta,
+            long sellableReservedDelta, BigDecimal releasedAmountJpy, long releasedQuantity,
+            ReservationState.Status reservationStatus) {
+        this(cashDeltaJpy, reservedDeltaJpy, sellableQuantityDelta, sellableReservedDelta,
+                releasedAmountJpy, releasedQuantity, reservationStatus, 0, null);
+    }
 }

@@ -56,6 +56,11 @@ final class ReservationController {
         return ResponseEntity.status(reserved ? 200 : 422).body(response);
     }
 
+    @GetMapping(BuyingPowerReservation.RESERVATIONS_PATH + "/{orderId}")
+    ResponseEntity<BuyingPowerReservation.Response> reservation(@PathVariable("orderId") String orderId) {
+        return ResponseEntity.of(reservations.find(orderId));
+    }
+
     @PostMapping(BuyingPowerReservation.RESERVATIONS_PATH + "/{orderId}/release")
     ReservationService.ReleaseResponse release(@PathVariable("orderId") String orderId) {
         var response = reservations.release(orderId);

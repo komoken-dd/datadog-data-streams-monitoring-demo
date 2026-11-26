@@ -20,6 +20,22 @@ class BuyingPowerRepository {
         this.jdbc = jdbc;
     }
 
+    void lockReservationOperation(String orderId) {
+        jdbc.query("select pg_advisory_xact_lock(hashtextextended(?, 0))",
+                (org.springframework.jdbc.core.ResultSetExtractor<Void>) rs -> null,
+                "buying-power-reservation:" + orderId);
+    }
+
+    boolean cancelled(String orderId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from"
+                + " buying_power_service.reservation_cancellations where order_id = ?)", Boolean.class, orderId));
+    }
+
+    void recordCancellation(String orderId) {
+        jdbc.update("insert into buying_power_service.reservation_cancellations (order_id, cancelled_at)"
+                + " values (?, now()) on conflict do nothing", orderId);
+    }
+
     Optional<AccountSnapshot> findAccount(String accountId) {
         return jdbc.query(
                         "select account_id, cash_jpy, reserved_jpy, updated_at from buying_power_service.accounts"
@@ -97,11 +113,14 @@ class BuyingPowerRepository {
         }
         jdbc.update(
                 "update buying_power_service.reservations set released_amount_jpy = released_amount_jpy + ?,"
-                        + " released_quantity = released_quantity + ?, status = ?, updated_at = now()"
+                        + " released_quantity = released_quantity + ?, status = ?,"
+                        + " reflected_quantity = reflected_quantity + ?, expired_quantity = coalesce(?, expired_quantity), updated_at = now()"
                         + " where order_id = ?",
                 delta.releasedAmountJpy(),
                 delta.releasedQuantity(),
                 delta.reservationStatus().name(),
+                delta.reflectedQuantityDelta(),
+                delta.expiredQuantity(),
                 orderId);
     }
 
@@ -164,7 +183,9 @@ class BuyingPowerRepository {
                 rs.getBigDecimal("released_amount_jpy"),
                 rs.getLong("reserved_quantity"),
                 rs.getLong("released_quantity"),
-                ReservationState.Status.valueOf(rs.getString("status")));
+                ReservationState.Status.valueOf(rs.getString("status")),
+                rs.getLong("reflected_quantity"),
+                (Long) rs.getObject("expired_quantity"));
     }
 
     record AccountSnapshot(String accountId, BigDecimal cashJpy, BigDecimal reservedJpy, Instant updatedAt) {

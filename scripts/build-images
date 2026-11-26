@@ -65,6 +65,7 @@ echo "Image prefix: ${REPOSITORY_PREFIX}"
 echo "Immutable image tag: ${IMAGE_TAG}"
 echo "Maven builder: ${MAVEN_IMAGE} (${MAVEN_IMAGE_TAG})"
 echo "Java runtime: ${RUNTIME_IMAGE} (${JAVA_RUNTIME_IMAGE_TAG})"
+echo "Patched builder/runtime JVM: ${JAVA_PATCHED_VERSION}"
 
 vcs_ref="${VCS_REF:-unknown}"
 if [[ "${vcs_ref}" == "unknown" ]] && command -v git >/dev/null 2>&1; then
@@ -107,12 +108,23 @@ fi
 
 maven_modules="$(IFS=,; echo "${selected_services[*]}")"
 mkdir -p "${PROJECT_ROOT}/apps/.m2"
+readonly patched_builder="localhost/brokerage-demo/java-build:${JAVA_PATCHED_RELEASE}-${podman_arch}"
+podman build --platform "${BUILD_PLATFORM}" \
+  --target java-build \
+  --build-arg "BUILDARCH=${podman_arch}" \
+  --build-arg "MAVEN_IMAGE=${MAVEN_IMAGE}" \
+  --build-arg "JAVA_JDK_AMD64_SHA256=${JAVA_JDK_AMD64_SHA256}" \
+  --build-arg "JAVA_JDK_ARM64_SHA256=${JAVA_JDK_ARM64_SHA256}" \
+  --tag "${patched_builder}" \
+  --file "${PROJECT_ROOT}/apps/Containerfile" \
+  --ignorefile "${PROJECT_ROOT}/apps/.containerignore" \
+  "${PROJECT_ROOT}/apps"
 podman run --rm \
   --platform "${BUILD_PLATFORM}" \
   --volume "${PROJECT_ROOT}/apps:/workspace" \
   --volume "${PROJECT_ROOT}/apps/.m2:/root/.m2" \
   --workdir /workspace \
-  "${MAVEN_IMAGE}" \
+  "${patched_builder}" \
   mvn -B -pl "${maven_modules}" -am clean package -DskipTests
 
 for service in "${selected_services[@]}"; do
@@ -126,6 +138,13 @@ for service in "${selected_services[@]}"; do
     --build-arg "IMAGE_VERSION=${IMAGE_TAG}"
     --build-arg "IMAGE_CREATED=${CONTAINER_CREATED}"
     --build-arg "RUNTIME_IMAGE=${RUNTIME_IMAGE}"
+    --build-arg "MAVEN_IMAGE=${MAVEN_IMAGE}"
+    --build-arg "BUILDARCH=${podman_arch}"
+    --build-arg "TARGETARCH=${PLATFORM#linux/}"
+    --build-arg "JAVA_JDK_AMD64_SHA256=${JAVA_JDK_AMD64_SHA256}"
+    --build-arg "JAVA_JDK_ARM64_SHA256=${JAVA_JDK_ARM64_SHA256}"
+    --build-arg "JAVA_JRE_AMD64_SHA256=${JAVA_JRE_AMD64_SHA256}"
+    --build-arg "JAVA_JRE_ARM64_SHA256=${JAVA_JRE_ARM64_SHA256}"
     --tag "${image}"
     --file "${PROJECT_ROOT}/apps/Containerfile"
     --ignorefile "${PROJECT_ROOT}/apps/.containerignore"

@@ -44,11 +44,11 @@ class NotificationDeadLetterRepository {
                 + " where resolved_at is null order by received_at, event_id", NotificationDeadLetterRepository::map);
     }
 
-    /** Locks unresolved rows so concurrent redrive requests cannot publish the same dead letter twice. */
-    List<NotificationDeadLetter> lockUnresolved() {
+    /** Bounded, non-blocking selection: concurrent workers claim different batches. */
+    List<NotificationDeadLetter> lockUnresolved(int limit) {
         return jdbc.query("select " + COLUMNS + " from " + TABLE
-                        + " where resolved_at is null order by received_at, event_id for update",
-                NotificationDeadLetterRepository::map);
+                        + " where resolved_at is null order by received_at, event_id limit ? for update skip locked",
+                NotificationDeadLetterRepository::map, limit);
     }
 
     void markResolved(String eventId, String redriveEventId) {

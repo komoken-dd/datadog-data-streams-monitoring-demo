@@ -31,7 +31,9 @@ class OrderConfiguration {
 
     @Bean
     OrderIntakeService orderIntakeService(
-            BuyingPowerClient buyingPowerClient, OrderEventPublisher publisher, MeterRegistry metrics, Clock clock) {
-        return new OrderIntakeService(buyingPowerClient, publisher, metrics, clock);
+            BuyingPowerClient buyingPowerClient, MeterRegistry metrics, Clock clock,
+            OrderSubmissionStore submissions, io.github.komokendd.dsm.brokerage.common.JdbcEventOutbox outbox,
+            org.springframework.transaction.support.TransactionTemplate transactions) {
+        return new OrderIntakeService(buyingPowerClient, metrics, clock, submissions, outbox, transactions);
     }
 }
