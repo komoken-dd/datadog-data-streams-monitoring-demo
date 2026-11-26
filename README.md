@@ -9,7 +9,7 @@ which service is involved.
 
 This project demonstrates how to instrument a Kafka-based Java application
 with DSM, APM, logs, and custom metrics. It simulates the order and
-buying-power (買付余力) flow of a retail online brokerage (ネット証券) trading
+buying-power flow of a retail online brokerage trading
 Japanese cash equities: customers place orders for five fictional
 instruments (`D101` to `D105`), buying power is checked synchronously, and
 Kafka fans out execution reports to buying power, holdings, trade reports,
@@ -58,16 +58,15 @@ After deployment, you can:
 
 - Explore the order and execution topology and Kafka health in DSM
 - Correlate customer impact with pathway latency, lag, traces, and logs
-- Trigger the opening rush (寄付き集中), a buying-power reflection delay
-  (「売ったのに買えない」), a push provider outage with redrive, recovery, and a
-  news-driven sell-off down to limit-down (ストップ安)
+- Trigger the opening rush, a buying-power reflection delay, a push provider
+  outage with redrive, recovery, and a news-driven sell-off down to limit-down
 - Follow one `order_id` or `account_id` through its events, spans, retries,
   and final outcome
 
 Dashboard and DSM screenshots from the previous version of this demo were
 removed and will be recaptured for the online-brokerage version.
 
-The dashboard's **デモ操作** (Operator Controls) tab runs the scenarios through Workflow
+The dashboard's operator controls run the scenarios through Workflow
 Automation and an Agent-based Private Action Runner; the control endpoints
 remain ClusterIP-only. The context-validating `scripts/demo-control` CLI
 provides the same controls without Workflow Automation. See the
@@ -166,7 +165,7 @@ conventions.
 
 ## Demo scenarios
 
-Use the dashboard's **デモ操作** (Operator Controls) or the CLI fallback:
+Use the dashboard's operator controls or the CLI fallback:
 
 ```bash
 scripts/demo-control <kind|eks> <baseline|stop|opening-rush|sell-off|buying-power-delay|push-outage|redrive>
@@ -174,11 +173,11 @@ scripts/demo-control <kind|eks> <baseline|stop|opening-rush|sell-off|buying-powe
 
 | Scenario | Action | What happens |
 |---|---|---|
-| Opening rush (寄付き集中) | `opening-rush` | 60 seconds of pre-open orders, then one opening-auction burst of executions |
+| Opening rush | `opening-rush` | 60 seconds of pre-open orders, then one opening-auction burst of executions |
 | Buying-power reflection delay | `buying-power-delay` | Sale proceeds are reflected late, so switch-trade BUYs are rejected for insufficient buying power |
 | Push provider outage and redrive | `push-outage`, then `baseline` and `redrive` | Notifications move through both retry topics into the DLT and are redriven after recovery |
 | Recovery | `baseline` | Lag drains and buying power catches up |
-| News-driven sell-off (材料による売り殺到) | `sell-off` | `D105` falls to limit-down (ストップ安); unfilled sell orders pile up and expire |
+| News-driven sell-off | `sell-off` | `D105` falls to limit-down; unfilled sell orders pile up and expire |
 
 See [demo-presentation-steps.md](docs/demo-presentation-steps.md) for what to
 run, where to look in DSM and on the dashboard, and the approximate values to
